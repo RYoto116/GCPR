@@ -122,3 +122,4 @@ public:
     int sizes_len;
     int n_thread;
 };
+#endif

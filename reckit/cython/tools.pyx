@@ -1,3 +1,5 @@
+# distutils: language = c++
+
 import numpy as np
 
 def get_float_type():

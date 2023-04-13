@@ -58,6 +58,22 @@ class Configurator(object):
             for cmd_argn, cmd_argv in self._cmd_args.items():
                 if cmd_argn in sec_arg:
                     sec_arg[cmd_argn] = cmd_argv
+    
+    def summarize(self):
+        """Get a summary of the configurator's arguments.
+        
+        Returns:
+            str: A string summary of arguments.
+        """
+        if len(self._sections) == 0:
+            raise ValueError("Configurator is empty.")
+        
+        args = self._sections[next(reversed(self._sections.keys()))]
+        params_id = '_'.join(["{}={}".format(arg, value) for arg, value in args.items() if len(value) < 20])
+        special_char = {'/', '\\', '\"', ':', '*', '?', '<', '>', '|', '\t', '\n', '\r', '\v', ' '}
+        params_id = [c if c not in special_char else '_' for c in params_id]
+        params_id = ''.join(params_id)
+        return params_id
 
     def __getitem__(self, item):
         if not isinstance(item, str):

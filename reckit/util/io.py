@@ -1,7 +1,7 @@
 import os
 import pickle
 import pandas as pd
-from reckit.tools.dataformat import df2dict
+from reckit.util.dataformat import df2dict
 
 
 def print_seperate_line():

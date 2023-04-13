@@ -29,7 +29,7 @@ class Evaluator(object):
         self.user_pos_test = user_test_dict if user_test_dict is not None else dict()
 
         self.metric_len = len(metric)
-        self.metric = [metric_dict[m] for m in metric]
+        self.metrics = [metric_dict[m] for m in metric]
         self.num_thread = num_thread
         self.batch_size = batch_size
         self.max_top = top_k if isinstance(top_k, int) else max(top_k)

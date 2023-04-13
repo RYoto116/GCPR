@@ -8,9 +8,9 @@ from model.base import AbstractRecommender
 from reckit import OrderedDict
 from reckit.random import randint_choice
 from functools import partial
-from data import PairwiseSamplerV2, CPRSampler
+from data import CPRSampler
 from time import time
-from reckit.util import l2_loss
+from reckit.util import l2_loss, cpr_loss
 
 def inner_product(a, b):
     return torch.sum(a*b, dim=-1)
@@ -221,21 +221,21 @@ class SGL(AbstractRecommender):
                 diag_indicator_user = sp.diags(indicator_user)
                 diag_indicator_item = sp.diags(indicator_item)
 
-                R = sp.csr_matrix(np.ones_like(users_np, dtype=np.float32), (users_np, items_np), shape=(self.num_users, self.num_items))
+                R = sp.csr_matrix((np.ones_like(users_np, dtype=np.float32), (users_np, items_np)), shape=(self.num_users, self.num_items))
                 R_prime = diag_indicator_user.dot(R).dot(diag_indicator_item)
                 (user_np_keep, item_np_keep) = R_prime.nonzero()
                 ratings_keep = R_prime.data
-                tmp_adj = sp.csr_matrix(ratings_keep, (user_np_keep, item_np_keep+self.num_users), shape=(n_nodes, n_nodes))
+                tmp_adj = sp.csr_matrix((ratings_keep, (user_np_keep, item_np_keep+self.num_users)), shape=(n_nodes, n_nodes))
             elif aug_type in ['ed', 'rw']:
                 keep_idx = randint_choice(len(users_np), size=int(len(users_np) * (1 - self.ssl_ratio)), replace=False)
                 user_np = users_np[keep_idx]
                 item_np = items_np[keep_idx]
                 ratings = np.ones_like(user_np, dtype=np.float32)
-                tmp_adj = sp.csr_matrix(ratings, (users_np, item_np+self.num_users), shape=(n_nodes, n_nodes))
+                tmp_adj = sp.csr_matrix((ratings, (user_np, item_np+self.num_users)), shape=(n_nodes, n_nodes))
         # 原图
         else:
             ratings = np.ones_like(users_np, dtype=np.float32)
-            tmp_adj = sp.csr_matrix(ratings, (users_np, items_np+self.num_users), shape=(n_nodes, n_nodes))
+            tmp_adj = sp.csr_matrix((ratings, (users_np, items_np+self.num_users)), shape=(n_nodes, n_nodes))
         adj_mat = tmp_adj + tmp_adj.T
 
         # 计算度数
@@ -248,20 +248,14 @@ class SGL(AbstractRecommender):
         adj_matrix = norm_adj.dot(d_mat_inv)
 
         return adj_matrix
-    def create_cpr_loss(self):
-        pos_scores = []
-        neg_scores = []
-        # self.users: [u1, u2, u1, u2, u3, ...]
 
-    def train_model(self):
-        # data_iter = PairwiseSamplerV2(self.dataset, num_neg=1, batch_size=self.batch_size, shuffle=True)
-        sample_ratio, sample_rate, n_thread = self.config["sample_ratio"], self.config["sample_rate"], self.config["n_thread"]
+    def train_model(self, CPRMode=True):
+        sample_ratio, sample_rate, n_thread = self.config["sample_ratio"], self.config["sample_rate"], self.config["num_thread"]
         data_iter = CPRSampler(self.dataset, sample_ratio=sample_ratio, sample_rate=sample_rate, batch_size=self.batch_size, n_thread=n_thread)
 
         self.logger.info(self.evaluator.metrics_info())
         stopping_step = 0
         for epoch in range(1, self.epochs + 1):
-            # total_loss, total_bpr_loss, total_reg_loss = 0.0, 0.0, 0.0
             total_loss, total_cpr_loss, total_reg_loss = 0.0, 0.0, 0.0
             training_start_time = time()
             # 构建子图
@@ -281,48 +275,63 @@ class SGL(AbstractRecommender):
             self.lightgcn.train()  # Sets the module in training mode.
 
             for bat_users, bat_items in data_iter:
-                self.batch_pos_i = bat_items
-                # todo
+                self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_items, None)
 
-            for bat_users, bat_pos_items, bat_neg_items in data_iter:
-                bat_users = torch.from_numpy(bat_users).long().to(self.device)
-                bat_pos_items = torch.from_numpy(bat_pos_items).long().to(self.device)
-                bat_neg_items = torch.from_numpy(bat_neg_items).long().to(self.device)
+                batch_user_embeds = self.lightgcn.user_embeddings(bat_users)
+                batch_pos_item_embeds = self.lightgcn.item_embeddings(bat_items)
 
-                sup_logits, ssl_logits_user, ssl_logits_item = self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_pos_items, bat_neg_items)
-                reg_loss = l2_loss(
-                    self.lightgcn.user_embeddings(bat_users),
-                    self.lightgcn.item_embeddings(bat_pos_items),
-                    self.lightgcn.item_embeddings(bat_neg_items),
-                )
+                u_splits = torch.split(batch_user_embeds, data_iter.batch_total_sample_sizes, 0)
+                i_splits = torch.split(batch_pos_item_embeds, data_iter.batch_total_sample_sizes, 0)
+                pos_scores = []
+                neg_scores = []
 
+                for idx in range(len(data_iter.batch_total_sample_sizes)):
+                    u_list = np.split(u_splits[idx], idx+2, 0)
+                    i_list = np.split(i_splits[idx], idx+2, 0)
 
-                bpr_loss = -torch.sum(F.logsigmoid(sup_logits))
+                    pos_scores.append(torch.reduce_mean([inner_product(u, i) for u, i in zip(u_list, i_list)], axis=0))
+                    neg_scores.append(torch.reduce_mean([inner_product(u, i) for u, i in zip(u_list, i_list[1:] + i_list[0])], axis=0))
 
-                # InfoNCE Loss
-                clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp)
-                clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp)
-                infonce_loss = clogits_user + clogits_item
+                pos_scores = torch.concat(pos_scores, axis=0)
+                neg_scores = torch.concat(neg_scores, axis=0)
 
-                loss = bpr_loss + self.reg * reg_loss + self.ssl_reg * infonce_loss
+                cpr = cpr_loss(pos_scores, neg_scores, self.batch_size, sample_rate)
+                reg_loss = l2_loss(batch_user_embeds, batch_pos_item_embeds)
+
+                loss = cpr + self.reg * reg_loss
                 total_loss += loss
-                total_bpr_loss += bpr_loss
+                total_cpr_loss += cpr
                 total_reg_loss += self.reg * reg_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
-            self.logger.info("[iter %d : loss : %.4f = %.4f + %.4f + %.4f, time: %f]" % (
+            
+            self.logger.info("[iter %d : loss : %.4f = %.4f + %.4f, time: %f]" % (
                 epoch,
                 total_loss / self.num_ratings,
-                total_bpr_loss / self.num_ratings,
-                (total_loss - total_bpr_loss - total_reg_loss) / self.num_ratings,
+                total_cpr_loss / self.num_ratings,
                 total_reg_loss / self.num_ratings,
                 time() - training_start_time,)
             )
-
-            self.evaluate_model()
+            
+            if epoch % self.verbose == 0 and epoch > self.config["starting_testing_epoch"]:
+                result, flag = self.evaluate_model()
+                self.logger.info("epoch %d\t%s" % (epoch, result))
+                # 找到了更好的参数
+                if flag:
+                    self.best_epoch = epoch
+                    stopping_step = 0
+                    self.logger.info("Find a better model.")
+                else:
+                    stopping_step += 1
+                    if stopping_step >= self.stop_cnt:
+                        self.logger.info("Early stopping is trigger at epoch: {}".format(epoch))
+                        break
+        
+        self.logger.info("best results@epoch %d\n" % self.best_epoch)
+        buf = '\t'.join([("%4.f" % x).ljust(12) for x in self.best_result])
+        self.logger.info("\t\t%s" % buf)
 
     def evaluate_model(self):
         flag = False

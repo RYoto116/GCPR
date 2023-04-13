@@ -1,3 +1,4 @@
+# distutils: language = c++
 from libcpp.unordered_set cimport unordered_set as cset
 import numpy as np
 cimport numpy as np

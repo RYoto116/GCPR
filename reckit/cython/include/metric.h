@@ -117,7 +117,7 @@ unordered_map<int, metric_fun> metric_dict = {{1, precision},
                                               {2, recall},
                                               {3, ap},
                                               {4, ndcg},
-                                              {5, mrr}
+                                              {5, mrr},
                                               {6, arp}
                                              };
 

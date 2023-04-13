@@ -40,7 +40,7 @@ class Interaction(object):
         user_dict = OrderedDict()
         user_grouped = self._data.groupby(_USER)
         for user, data in user_grouped:
-            user_dict[user] = data
+            user_dict[user] = data[_ITEM].to_numpy(dtype=np.int32)
 
         self._buffer["user_dict"] = deepcopy(user_dict)
         return user_dict
@@ -76,25 +76,26 @@ class Dataset(object):
         if columns not in _column_dict:
             raise ValueError("'columns' must be one of '%s'." % ", ".join(_column_dict.keys()))
         columns = _column_dict[columns]
-        prefix = os.path.join(data_dir, dataset_name)
+        prefix = os.path.join(data_dir, dataset_name, dataset_name)
 
         train_file = prefix + ".train"
         if os.path.isfile(train_file):
             _train_data = pd.read_csv(train_file, sep=sep, header=None, names=columns)
         else:
-            raise FileNotFoundError("%s does not exist." % train_file)
+            raise FileNotFoundError(f"{train_file} does not exist.")
 
         valid_file = prefix + ".valid"
         if os.path.isfile(valid_file):
             _valid_data = pd.read_csv(valid_file, sep=sep, header=None, names=columns)
         else:
-            raise FileNotFoundError("%s does not exist." % valid_file)
+            _valid_data = pd.DataFrame()
+            warnings.warn(f"{valid_file} does not exist.")
 
         test_file = prefix + ".test"
         if os.path.isfile(test_file):
             _test_data = pd.read_csv(test_file, sep=sep, header=None, names=columns)
         else:
-            raise FileNotFoundError("%s does not exist." % test_file)
+            raise FileNotFoundError(f"{test_file} does not exist.")
 
         user2id_file = prefix + ".user2id"
         if os.path.isfile(user2id_file):
@@ -102,7 +103,7 @@ class Dataset(object):
             self.user2id = OrderedDict(_user2id)
             self.id2user = OrderedDict([(idx, user) for user, idx in self.user2id.items()])
         else:
-            warnings.warn("%s does not exist." % user2id_file)
+            warnings.warn(f"{user2id_file} does not exist.")
 
         item2id_file = prefix + ".item2id"
         if os.path.isfile(item2id_file):
@@ -110,7 +111,7 @@ class Dataset(object):
             self.item2id = OrderedDict(_item2id)
             self.id2item = OrderedDict([(idx, item) for item, idx in self.item2id.items()])
         else:
-            warnings.warn("%s does not exist." % user2id_file)
+            warnings.warn(f"{item2id_file} does not exist.")
 
         data_list = [data for data in [_train_data, _valid_data, _test_data] if not data.empty]
         all_data = pd.concat(data_list)

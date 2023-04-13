@@ -1,7 +1,9 @@
+# distutils: language = c++
 from libcpp.unordered_set cimport unordered_set as cset
 from libcpp.vector cimport vector as cvector
 import numpy as np
-from reckit.cython import float_type
+cimport numpy as np
+from .tools import float_type
 
 ctypedef cset[int] int_set
 

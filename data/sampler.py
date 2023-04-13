@@ -61,8 +61,8 @@ class CPRSampler(Sampler):
         self.num_items = dataset.num_items
         self.num_ratings = dataset.num_ratings
 
-        self.user_pos_dict = dataset.to_user_dict()  # OrderedDict
-        self.train = [self.user_pos_dict[u] if u in self.user_pos_dict else [] for u in range(self.num_users)]
+        self.user_pos_dict = dataset.train_data.to_user_dict()  # OrderedDict(userID: DataFrame[items])
+        self.train = [self.user_pos_dict[u] if u in self.user_pos_dict.keys() else [] for u in range(self.num_users)]
         self.train_inverse = invert_dict(self.user_pos_dict)
         self.train_inverse = [self.train_inverse[i] if i in self.train_inverse else [] for i in range(self.num_items)]
 
@@ -76,14 +76,14 @@ class CPRSampler(Sampler):
 
         self.n_step = self.num_ratings // self.batch_size
         if k_interact is None:
-            ratios = np.power(sample_ratio, max_k_interact-2, -1, -1)
+            ratios = np.power(sample_ratio, np.arange(max_k_interact - 2, -1, -1))
         else:
             ratios = np.array([0]*(k_interact-2) + [1])
         batch_sizes = np.round(batch_size / np.sum(ratios) * ratios).astype(np.int32)
         batch_sizes[-1] = batch_size - np.sum(batch_sizes[:-1])
 
         self.batch_sample_sizes = np.ceil(np.array(batch_sizes)*sample_rate).astype(np.int32)
-        self.batch_total_sample_sizes = self.batch_sample_sizes * np.arange(2, len(self.batch_sample_sizes+2))
+        self.batch_total_sample_sizes = self.batch_sample_sizes * np.arange(2, len(self.batch_sample_sizes)+2)
         self.batch_sample_size = np.sum(self.batch_sample_sizes)
         self.sample_size = self.n_step * self.batch_sample_size
 
@@ -108,7 +108,15 @@ class CPRSampler(Sampler):
         interact_idx = np.random.choice(self.num_ratings, size=self.choice_size).astype(np.int32)
         if self.cpr_sampler.sample(interact_idx, self.batch_choice_sizes) == -1:
             raise RuntimeError("choice_size is not large enough")
-        return zip(batch_iterator(self.users, self.batch_sample_size), batch_iterator(self.items, self.batch_sample_size),)
+        
+        length = len(self.users)
+        if self.drop_last:
+            n_batch = length // self.batch_size
+        else:
+            n_batch = ceil(length / self.batch_size)
+            
+        for i in range(n_batch):
+            yield self.users[i * self.batch_sample_size : (i + 1) * self.batch_sample_size], self.items[i * self.batch_sample_size : (i + 1) * self.batch_sample_size]
 
     def __len__(self):
         length = len(self.users)

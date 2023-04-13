@@ -32,10 +32,15 @@ def find_recommender(recommender):
 
     if module is None:
         raise ImportError(f"Recommender: {recommender} not found")
+    if hasattr(module, recommender):
+        Recommender = getattr(module, recommender)
+    else:
+        raise ImportError(f"Import {recommender} failed from {module.__file__}!")
+    return Recommender
 
 if __name__ == '__main__':
-    data_dir = "/mnt/GCPR/dataset/"
-    root_dir = "/mnt/GCPR/"
+    data_dir = "/home/yjx/projects/GCPR/dataset/"
+    root_dir = "/home/yjx/projects/GCPR/"
     configurator = Configurator(root_dir, data_dir)
     configurator.add_config(root_dir + "NeuRec.ini", section="NeuRec")
     configurator.parse_cmd()
