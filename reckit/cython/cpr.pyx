@@ -1,9 +1,6 @@
-# distutils: language = c++
 import numpy as np
 cimport numpy as np
-from libcpp.vector cimport vector
-from libcpp.unordered_set cimport unordered_set
-from .sampler cimport CppCPRSampler
+from .cpr cimport CppCPRSampler
 
 cdef class CyCPRSampler:
     cdef CppCPRSampler c_cross_sampler

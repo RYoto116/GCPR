@@ -8,7 +8,7 @@ from model.base import AbstractRecommender
 from reckit import OrderedDict
 from reckit.random import randint_choice
 from functools import partial
-from data import CPRSampler
+from reckit.util.sampler import CPRSampler
 from time import time
 from reckit.util import l2_loss, cpr_loss
 
@@ -249,7 +249,7 @@ class SGL(AbstractRecommender):
 
         return adj_matrix
 
-    def train_model(self, CPRMode=True):
+    def train_model(self):
         sample_ratio, sample_rate, n_thread = self.config["sample_ratio"], self.config["sample_rate"], self.config["num_thread"]
         data_iter = CPRSampler(self.dataset, sample_ratio=sample_ratio, sample_rate=sample_rate, batch_size=self.batch_size, n_thread=n_thread)
 
@@ -274,7 +274,7 @@ class SGL(AbstractRecommender):
 
             self.lightgcn.train()  # Sets the module in training mode.
 
-            for bat_users, bat_items in data_iter:
+            for bat_users, bat_items in data_iter.cpr_sampler.sampler():
                 self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_items, None)
 
                 batch_user_embeds = self.lightgcn.user_embeddings(bat_users)
