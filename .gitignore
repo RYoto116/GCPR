@@ -1,6 +1,7 @@
 *.cpp
 *.so
 *.pyc
+*.log
 .idea/
 .vscode/
 __pycache__

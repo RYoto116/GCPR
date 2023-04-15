@@ -24,7 +24,7 @@ def batch_iterator(data, batch_size, drop_last=False):
     else:
         n_batch = ceil(length / batch_size)
     for i in range(n_batch):
-        yield data[i * batch_size : (i + 1) * batch_size]
+        yield np.asarray(data[i * batch_size : (i + 1) * batch_size])
 
 class CPRSampler(object):
     def __init__(self, dataset, sample_ratio, sample_rate, batch_size=1024, n_thread=4, k_interact=None, max_k_interact=3, drop_last=False):
