@@ -1,7 +1,7 @@
 # 采样负样本
 import numpy as np
 from collections import defaultdict, Iterable
-from reckit.random import randint_choice
+from reckit.rand import randint_choice
 from reckit.dataiterator import DataIterator
 
 class Sampler(object):

@@ -1,7 +1,7 @@
 from libcpp.vector cimport vector
 from libcpp.unordered_set cimport unordered_set
 
-cdef extern from "include/sampler.h":
+cdef extern from "include/cpr.h":
     cdef cppclass CppCPRSampler:
         CppCPRSampler() except +
         CppCPRSampler(vector[unordered_set[int]] train,

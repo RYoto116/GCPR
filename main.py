@@ -5,7 +5,12 @@ import random
 from importlib.util import find_spec
 from importlib import import_module
 from reckit.configurator import Configurator
-from reckit import typeassert
+from reckit.util.decorators import typeassert
+from reckit.model.SGL import SGL
+
+import faulthandler
+
+faulthandler.enable()
 
 def _set_random_seed(seed=2023):
     np.random.seed(seed)
@@ -47,10 +52,9 @@ if __name__ == '__main__':
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(configurator.gpu_id)
     _set_random_seed(configurator.seed)
-    Recommender = find_recommender(configurator.recommender)
 
     model_cfg_file = os.path.join(root_dir + "conf", configurator.recommender + ".ini")
     configurator.add_config(model_cfg_file, section="hyperparameters")
 
-    recommender = Recommender(configurator)
-    recommender.train_model()
+    model = SGL(configurator)
+    model.train_model()

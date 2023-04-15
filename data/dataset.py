@@ -4,7 +4,7 @@ import os
 from collections import OrderedDict
 import warnings
 from copy import deepcopy
-from reckit import typeassert
+from reckit.util.decorators import typeassert
 
 _USER = "user"
 _ITEM = "item"

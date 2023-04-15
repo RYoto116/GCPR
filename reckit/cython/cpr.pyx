@@ -1,3 +1,4 @@
+# distutils: language = c++
 import numpy as np
 cimport numpy as np
 from .cpr cimport CppCPRSampler
@@ -5,7 +6,8 @@ from .cpr cimport CppCPRSampler
 cdef class CyCPRSampler:
     cdef CppCPRSampler c_cross_sampler
     
-    def __init__(self, vector[unordered_set[int]] train,
+    def __init__(self, 
+                    vector[unordered_set[int]] train,
                     np.ndarray[int, ndim=1] u_interacts,
                     np.ndarray[int, ndim=1] i_interacts,
                     np.ndarray[int, ndim=1] users,

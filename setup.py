@@ -74,14 +74,18 @@
 #     return wrapper
 
 
-# @clean
+# # @clean
 # def compile_cpp():
 #     extensions = get_extensions(".")
 #     include_dirs = get_include_dirs(".")
-#     module_list = cythonize(extensions, language="c++", annotate=False)
+#     module_list = cythonize(extensions, language="c++", annotate=False, compiler_directives={  # 定义编译指令  
+#             "language_level": 3,  # 指定语言级别为 3  
+#             "boundscheck": False,  # 禁用数组边界检查  
+#             "wraparound": False,  # 禁用数组 wraparound 检查  
+#         },
+# )
 
 #     setup(ext_modules=module_list, include_dirs=include_dirs)
-
 
 # if __name__ == "__main__":
 #     compile_cpp()
