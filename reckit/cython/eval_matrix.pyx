@@ -10,7 +10,7 @@ ctypedef cset[int] int_set
 cdef extern from "include/evaluate.h":
     void cpp_evaluate_matrix(float *rating_matrix, int rating_len,
                              cvector[int_set] &test_items,
-                             cvector[int] metric, int top_k,
+                             cvector[int] metric, int topk,
                              int thread_num, float *results_pt)
 
 def eval_score_matrix(score_matrix, test_items, metric, topk, thread_num):

@@ -315,9 +315,13 @@ class SGL(AbstractRecommender):
                 for idx in range(len(data_iter.batch_total_sample_sizes)):
                     u_list = np.split(u_splits[idx], idx+2, 0)
                     i_list = np.split(i_splits[idx], idx+2, 0)
-
-                    pos_scores.append(torch.mean([inner_product(u, i) for u, i in zip(u_list, i_list)], axis=0))
-                    neg_scores.append(torch.mean([inner_product(u, i) for u, i in zip(u_list, i_list[1:] + i_list[0])], axis=0))
+                    
+                    pos_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_list)]), axis=0))
+                    
+                    i_list.insert(len(i_list), i_list[0])
+                    i_list.remove(i_list[0])
+                    
+                    neg_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_list)]), axis=0))
 
                 pos_scores = torch.concat(pos_scores, axis=0)
                 neg_scores = torch.concat(neg_scores, axis=0)
@@ -354,7 +358,7 @@ class SGL(AbstractRecommender):
                 time()-training_start_time,)
             )
             
-            if epoch % self.verbose == 0 and epoch > self.config["starting_testing_epoch"]:
+            if epoch % self.verbose == 0 and epoch > self.config.start_testing_epoch:
                 result, flag = self.evaluate_model()
                 self.logger.info("epoch %d\t%s" % (epoch, result))
                 # 找到了更好的参数

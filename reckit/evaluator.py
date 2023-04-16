@@ -58,24 +58,24 @@ class Evaluator(object):
         if not isinstance(test_users, (list, tuple, set, np.ndarray)):
             raise TypeError("'test_user' must be a list, tuple, set or numpy array!")
 
-        DataIterator(test_users, batch_size=self.batch_size, shuffle=False, drop_last=False)
+        test_users = DataIterator(test_users, batch_size=self.batch_size, shuffle=False, drop_last=False)
         batch_result = []
         for batch_users in test_users:
             test_items = [self.user_pos_test[u] for u in batch_users]
             ranking_score = model.predict(batch_users)  # [batch_size, num_items]
             if not is_ndarray(ranking_score, float_type):
-                ranking_score = np.ndarray(ranking_score, dtype=float_type)
+                ranking_score = np.array(ranking_score, dtype=float_type)
             # 将训练样本的分数设为-inf
             for idx, user in enumerate(batch_users):
                 if user in self.user_pos_train and len(self.user_pos_train[user]) > 0:
                     train_items = self.user_pos_train[user]
                     ranking_score[idx][train_items] = -np.inf
-                    result = eval_score_matrix(ranking_score, test_items, self.metric, self.max_top, self.num_thread)  # [batch_size, topk * num_metrics]
-                    batch_result.append(result)
+            result = eval_score_matrix(ranking_score, test_items, self.metrics, self.max_top, self.num_thread)  # [batch_size, topk * num_metrics]
+            batch_result.append(result)
 
         all_user_result = np.concatenate(batch_result, axis=0)  # [num_users, topk * num_metrics]
         final_result = np.mean(all_user_result, axis=0)         # [topk * num_metrics]
-        final_result.reshape(final_result, newshape=[self.metric_len, self.max_top])  # [num_metrics, topk]
+        final_result = np.reshape(final_result, newshape=[self.metric_len, self.max_top])  # [num_metrics, topk]
         final_result = final_result[:, self.top_show-1]
         final_result = np.reshape(final_result, newshape=[-1])
         buf = '\t'.join([("%.8f" % x).ljust(12) for x in final_result])

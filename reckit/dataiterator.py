@@ -11,7 +11,7 @@ class _Dataset(object):
                 raise ValueError("The length of the given data are not equal!")
         self.data = data
 
-    def __len(self):
+    def __len__(self):
         return len(self.data[0])
 
     def __getitem__(self, idx):
@@ -129,15 +129,15 @@ class _DataLoaderIter(object):
 
 class DataIterator(object):
     def __init__(self, *data, batch_size=1, shuffle=False, drop_last=False):
-        dataset = _Dataset(list(data))
+        self.dataset = _Dataset(list(data))
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.drop_last = drop_last
 
         if shuffle:
-            sampler = RandomSampler(dataset)
+            sampler = RandomSampler(self.dataset)
         else:
-            sampler = SequentialSampler(dataset)
+            sampler = SequentialSampler(self.dataset)
         self.batch_sampler = BatchSampler(sampler, batch_size, drop_last)
 
     def __iter__(self):

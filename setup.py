@@ -103,9 +103,7 @@ setup(
             extra_compile_args=["-std=c++11"],  # 指定编译参数  
         ),  
         compiler_directives={  # 定义编译指令  
-            "language_level": 3,  # 指定语言级别为 3  
-            "boundscheck": False,  # 禁用数组边界检查  
-            "wraparound": False,  # 禁用数组 wraparound 检查  
+            "language_level": 3,  # 指定语言级别为 3   
         },  
     ),  
     include_dirs=["reckit/cython/include/", np.get_include()],  # 指定 include 文件夹的路径  
