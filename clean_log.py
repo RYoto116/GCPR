@@ -2,10 +2,11 @@ import os
 import datetime
 import sys
 
-log_dir = "./log/"
+log_dir = "log/"
 dataset = sys.argv[1]
+model = sys.argv[2]
  #需要清空的文件夹
-dirToBeEmptied = os.path.join(log_dir, dataset)
+dirToBeEmptied = os.path.join(log_dir, dataset, model)
 
 ds = list(os.walk(dirToBeEmptied)) #获得所有文件夹的信息列表
 delta = datetime.timedelta(days=1) #设定365天前的文件为过期

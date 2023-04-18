@@ -6,7 +6,7 @@ from importlib.util import find_spec
 from importlib import import_module
 from reckit.configurator import Configurator
 from reckit.util.decorators import typeassert
-from reckit.model.SGL import SGL
+from reckit.model.GCPR import GCPR
 
 import faulthandler
 
@@ -25,15 +25,11 @@ def _set_random_seed(seed=2023):
 
 @typeassert(recommender=str)
 def find_recommender(recommender):
-    model_dirs = set(os.listdir("model"))
-    model_dirs.remove("base")
-
+    spec_path = ".".join(["reckit.model", recommender])
     module = None
-    for tdir in model_dirs:
-        spec_path = ".".join(["model", tdir, recommender])
-        if find_spec(spec_path):
-            module = import_module(spec_path)
-            break
+    
+    if find_spec(spec_path):
+        module = import_module(spec_path)
 
     if module is None:
         raise ImportError(f"Recommender: {recommender} not found")
@@ -52,9 +48,11 @@ if __name__ == '__main__':
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(config.gpu_id)
     _set_random_seed(config.seed)
+    
+    Recommender = find_recommender(config.recommender)
 
     model_cfg_file = os.path.join(root_dir + "conf", config.recommender + ".ini")
     config.add_config(model_cfg_file, section="hyperparameters")
 
-    model = SGL(config)
-    model.train_model(config.CPRMode)
+    model = Recommender(config)
+    model.train_model()
