@@ -3,7 +3,7 @@ from reckit.dataiterator import DataIterator
 from reckit.cython import is_ndarray, float_type
 from reckit.cython import eval_score_matrix
 
-metric_dict = {"Precision": 1, "Recall": 2, "MAP": 3, "NDCG": 4, "MRR": 5}
+metric_dict = {"Precision": 1, "Recall": 2, "MAP": 3, "NDCG": 4, "MRR": 5, "ARP": 6}
 re_metric_dict = {value: key for key, value in metric_dict.items()}
 
 # Evaluator for item ranking task.
@@ -25,6 +25,7 @@ class Evaluator(object):
                 raise ValueError("There is not the metric named '%s'!" % metric)
 
         self.dataset = dataset
+        self.item_degrees = dataset.item_degrees
         self.user_pos_train = user_train_dict if user_train_dict is not None else dict()
         self.user_pos_test = user_test_dict if user_test_dict is not None else dict()
 
@@ -47,10 +48,13 @@ class Evaluator(object):
         return "metrics:\t%s" % metric
 
     def evaluate(self, model, test_users=None):
-        """Evaluate `model`.
-        :param model: 必须有方法 `predict(self, users)`，其中`users`是user列表，返回值是一个2维向量，包含`user`对所有item的评分
-        :param test_users: Default is None and means test all users in user_pos_test.
-        :return: str, A single-line string consist of all results
+        """Evaluate model
+        Args:
+            model: 必须有方法 `predict(self, users)`，其中`users`是user列表, 返回值是一个2维向量，包含`user`对所有item的评分
+            test_users: Default is None and means test all users in user_pos_test.
+        
+        return: 
+            str, A single-line string consist of all results
         """
         if not hasattr(model, "predict"):
             raise AttributeError("'model' must have attribute 'predict'.")
@@ -70,7 +74,8 @@ class Evaluator(object):
                 if user in self.user_pos_train and len(self.user_pos_train[user]) > 0:
                     train_items = self.user_pos_train[user]
                     ranking_score[idx][train_items] = -np.inf
-            result = eval_score_matrix(ranking_score, test_items, self.metrics, self.max_top, self.num_thread)  # [batch_size, topk * num_metrics]
+            # result = eval_score_matrix(ranking_score, test_items, self.metrics, self.max_top, self.num_thread)  # [batch_size, topk * num_metrics]
+            result = eval_score_matrix(ranking_score, test_items, self.metrics, list(self.item_degrees), self.max_top, self.num_thread)  # [batch_size, topk * num_metrics]
             batch_result.append(result)
 
         all_user_result = np.concatenate(batch_result, axis=0)  # [num_users, topk * num_metrics]

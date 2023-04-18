@@ -8,10 +8,14 @@ from reckit.model.abstract_recommender import AbstractRecommender
 from reckit import OrderedDict
 from reckit.rand import randint_choice
 from functools import partial
+from data import PairwiseSamplerV2
 from reckit import CPRSampler
 from time import time
 from reckit.util import l2_loss, cpr_loss
-
+from ..util.decorators import timer
+import copy
+import warnings
+ 
 def inner_product(a, b):
     return torch.sum(a*b, dim=-1)
 
@@ -87,6 +91,8 @@ class _LightGCN(nn.Module):
         user_embs = F.embedding(users, user_embeddings)      # [batch_size, embedding_size]
         item_embs = F.embedding(items, item_embeddings)      # [batch_size, embedding_size]
         neg_item_embs = F.embedding(neg_items, item_embeddings)
+        
+        cpr_embs = [user_embs, item_embs, neg_item_embs]
         user_embs1 = F.embedding(users, user_embeddings1)    # [batch_size, embedding_size]
         item_embs1 = F.embedding(items, item_embeddings1)    # [batch_size, embedding_size]
         user_embs2 = F.embedding(users, user_embeddings2)    # [batch_size, embedding_size]
@@ -104,7 +110,7 @@ class _LightGCN(nn.Module):
         ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
         ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
 
-        return sup_logits, ssl_logits_user, ssl_logits_item
+        return sup_logits, ssl_logits_user, ssl_logits_item, cpr_embs 
 
     def _forward_gcn(self, norm_adj):
         ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
@@ -202,7 +208,10 @@ class SGL(AbstractRecommender):
 
         self.optimizer = torch.optim.Adam(self.lightgcn.parameters(), lr=self.lr)
 
+    @timer
     def create_adj_mat(self, is_subgraph=False, aug_type='ed'):
+        warnings.filterwarnings('ignore')
+        
         n_nodes = self.num_users + self.num_items
         users_items = self.dataset.train_data.to_user_item_pairs()
         users_np, items_np = users_items[:, 0], users_items[:, 1]
@@ -249,15 +258,18 @@ class SGL(AbstractRecommender):
 
         return adj_matrix
 
-    def train_model(self):
-        sample_ratio, sample_rate, n_thread = self.config["sample_ratio"], self.config["sample_rate"], self.config["num_thread"]
-        data_iter = CPRSampler(self.dataset, sample_ratio=sample_ratio, sample_rate=sample_rate, batch_size=self.batch_size, n_thread=n_thread)
-
+    def train_model(self, CPRMode=1):
+        if CPRMode:
+            sample_ratio, sample_rate, n_thread = self.config["sample_ratio"], self.config["sample_rate"], self.config["num_thread"]
+            data_iter = CPRSampler(self.dataset, sample_ratio=sample_ratio, sample_rate=sample_rate, batch_size=self.batch_size, n_thread=n_thread)
+        else:
+            data_iter = PairwiseSamplerV2(self.dataset.train_data, num_neg=1, batch_size=self.batch_size, shuffle=True)                    
+        
         self.logger.info(self.evaluator.metrics_info())
         stopping_step = 0
         for epoch in range(1, self.epochs + 1):
             # Loss = CPR Loss + InfoNCE Loss + Reg Loss
-            total_loss, total_cpr_loss, total_reg_loss = 0.0, 0.0, 0.0
+            total_loss, total_sup_loss, total_reg_loss = 0.0, 0.0, 0.0
             training_start_time = time()
             # 构建子图
             if self.ssl_aug_type in ['nd', 'ed']:
@@ -275,89 +287,115 @@ class SGL(AbstractRecommender):
 
             self.lightgcn.train()  # Sets the module in training mode.
 
-            for bat_users, bat_items in data_iter.sample():
-                # [(i1, i2), (i1, i2, i3)]
-                split_indices = []
-                for i in range(len(data_iter.batch_total_sample_sizes)):
-                    if i == 0:
-                        split_indices.append(data_iter.batch_total_sample_sizes[i])
-                    else:
-                        split_indices.append(data_iter.batch_total_sample_sizes[i] + split_indices[i-1])                        
-                
-                bat_items_splits = np.split(bat_items, split_indices, 0)
-                bat_neg_items = []
-                
-                for idx in range(len(split_indices)):
-                    # idx = 0: bat_items_list = [i1, i2]
-                    # idx = 1: bat_items_list = [i1, i2, i3]
-                    bat_items_list = np.split(bat_items_splits[idx], idx+2, 0)
-                    for i in range(len(bat_items_list)):
+            if CPRMode:
+                for bat_users, bat_items in data_iter.sample():
+                    # [(i1, i2), (i1, i2, i3)]
+                    split_indices = []
+                    for i in range(len(data_iter.batch_total_sample_sizes)):
                         if i == 0:
-                            continue
-                        bat_neg_items.append(bat_items_list[i])
-                    bat_neg_items.append(bat_items_list[0])                
-                bat_neg_items = np.concatenate(bat_neg_items)
-                
-                bat_users = torch.from_numpy(bat_users).long().to(self.device)          # [batch_size]
-                bat_items = torch.from_numpy(bat_items).long().to(self.device)          # [batch_size]
-                bat_neg_items = torch.from_numpy(bat_neg_items).long().to(self.device)  # [batch_size]
-
-                _, ssl_logits_user, ssl_logits_item = self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_items, bat_neg_items)
-
-                batch_user_embeds = self.lightgcn.user_embeddings(bat_users)
-                batch_pos_item_embeds = self.lightgcn.item_embeddings(bat_items)
-
-                u_splits = torch.split(batch_user_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
-                i_splits = torch.split(batch_pos_item_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
-                pos_scores = []
-                neg_scores = []
-
-                for idx in range(len(data_iter.batch_total_sample_sizes)):
-                    u_list = np.split(u_splits[idx], idx+2, 0)
-                    i_list = np.split(i_splits[idx], idx+2, 0)
+                            split_indices.append(data_iter.batch_total_sample_sizes[i])
+                        else:
+                            split_indices.append(data_iter.batch_total_sample_sizes[i] + split_indices[i-1])                        
                     
-                    pos_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_list)]), axis=0))
+                    bat_items_splits = np.split(bat_items, split_indices, 0)[:-1]
+                    bat_neg_items = copy.deepcopy(bat_items_splits)
                     
-                    i_list.insert(len(i_list), i_list[0])
-                    i_list.remove(i_list[0])
+                    for idx in range(len(split_indices)):
+                        # idx = 0: bat_items_list = [i1, i2]
+                        # idx = 1: bat_items_list = [i1, i2, i3]
+                        bat_neg_items[idx] = np.split(bat_neg_items[idx], idx+2, 0)
+                        bat_neg_items[idx].insert(len(bat_neg_items[idx]), bat_neg_items[idx][0])
+                        bat_neg_items[idx].remove(bat_neg_items[idx][0])
+                        bat_neg_items[idx] = np.array(bat_neg_items[idx]).ravel()
+                        
+                    bat_neg_items = np.concatenate(bat_neg_items, axis=-1)
                     
-                    neg_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_list)]), axis=0))
+                    bat_users = torch.from_numpy(bat_users).long().to(self.device)          # [batch_size]
+                    bat_items = torch.from_numpy(bat_items).long().to(self.device)          # [batch_size]
+                    bat_neg_items = torch.from_numpy(bat_neg_items).long().to(self.device)  # [batch_size]
 
-                pos_scores = torch.concat(pos_scores, axis=0)
-                neg_scores = torch.concat(neg_scores, axis=0)
-                
-                # CPR Loss
-                cpr = cpr_loss(pos_scores, neg_scores, self.batch_size, sample_rate)
-                # Reg Loss
-                reg_loss = l2_loss(
-                    self.lightgcn.user_embeddings(bat_users),
-                    self.lightgcn.item_embeddings(bat_items),
-                    self.lightgcn.item_embeddings(bat_neg_items),
-                )
-                # InfoNCE Loss
-                clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
-                clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
-                infonce_loss = torch.sum(clogits_user + clogits_item)
-                
-                loss = cpr + self.reg * reg_loss + self.ssl_reg * infonce_loss
-                
-                total_loss += loss
-                total_cpr_loss += cpr
-                total_reg_loss += self.reg * reg_loss
+                    _, ssl_logits_user, ssl_logits_item, cpr_embs = self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_items, bat_neg_items)
+                    
+                    batch_user_embeds, batch_pos_item_embeds, batch_neg_item_embeds = cpr_embs
+                    
+                    u_splits = torch.split(batch_user_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
+                    i_splits = torch.split(batch_pos_item_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
+                    i_neg_splits = torch.split(batch_neg_item_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
+                    
+                    pos_scores = []
+                    neg_scores = []
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-            
+                    for idx in range(len(data_iter.batch_total_sample_sizes)):
+                        u_list = np.split(u_splits[idx], idx+2, 0)
+                        i_list = np.split(i_splits[idx], idx+2, 0)
+                        i_neg_list = np.split(i_neg_splits[idx], idx+2, 0)
+                        
+                        pos_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_list)]), axis=0))
+                        neg_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_neg_list)]), axis=0))
+
+                    pos_scores = torch.concat(pos_scores, axis=0)
+                    neg_scores = torch.concat(neg_scores, axis=0)
+                    
+                    # CPR Loss
+                    cpr = cpr_loss(pos_scores, neg_scores, self.batch_size, sample_rate)
+                    
+                    # Reg Loss
+                    reg_loss = l2_loss(batch_user_embeds, batch_pos_item_embeds, batch_neg_item_embeds)
+                    
+                    # InfoNCE Loss
+                    clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
+                    clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
+                    infonce_loss = torch.sum(clogits_user + clogits_item)
+                    loss = cpr + self.reg * reg_loss + self.ssl_reg * infonce_loss
+                    
+                    total_loss += loss
+                    total_sup_loss += cpr
+                    total_reg_loss += self.reg * reg_loss
+
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+                
+                
+            else:
+                for bat_users, bat_pos_items, bat_neg_items in data_iter:
+                    bat_users = torch.from_numpy(bat_users).long().to(self.device)
+                    bat_pos_items = torch.from_numpy(bat_pos_items).long().to(self.device)
+                    bat_neg_items = torch.from_numpy(bat_neg_items).long().to(self.device)
+                    sup_logits, ssl_logits_user, ssl_logits_item, _ = self.lightgcn(
+                        sub_graph1, sub_graph2, bat_users, bat_pos_items, bat_neg_items)
+                    
+                    # BPR Loss
+                    bpr_loss = -torch.sum(F.logsigmoid(sup_logits))
+
+                    # Reg Loss
+                    reg_loss = l2_loss(
+                        self.lightgcn.user_embeddings(bat_users),
+                        self.lightgcn.item_embeddings(bat_pos_items),
+                        self.lightgcn.item_embeddings(bat_neg_items),
+                    )
+
+                    # InfoNCE Loss
+                    clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
+                    clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
+                    infonce_loss = torch.sum(clogits_user + clogits_item)
+                    
+                    loss = bpr_loss + self.ssl_reg * infonce_loss + self.reg * reg_loss
+                    total_loss += loss
+                    total_sup_loss += bpr_loss
+                    total_reg_loss += self.reg * reg_loss
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+
             self.logger.info("[iter %d : loss : %.4f = %.4f + %.4f + %.4f, time: %f]" % (
                 epoch, 
                 total_loss/self.num_ratings,
-                total_cpr_loss / self.num_ratings,
-                (total_loss - total_cpr_loss - total_reg_loss) / self.num_ratings,
+                total_sup_loss / self.num_ratings,
+                (total_loss - total_sup_loss - total_reg_loss) / self.num_ratings,
                 total_reg_loss / self.num_ratings,
                 time()-training_start_time,)
             )
-            
             if epoch % self.verbose == 0 and epoch > self.config.start_testing_epoch:
                 result, flag = self.evaluate_model()
                 self.logger.info("epoch %d\t%s" % (epoch, result))
@@ -373,7 +411,7 @@ class SGL(AbstractRecommender):
                         break
         
         self.logger.info("best results@epoch %d\n" % self.best_epoch)
-        buf = '\t'.join([("%4.f" % x).ljust(12) for x in self.best_result])
+        buf = '\t'.join([("%.4f" % x).ljust(12) for x in self.best_result])
         self.logger.info("\t\t%s" % buf)
 
     def evaluate_model(self):

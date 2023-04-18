@@ -46,15 +46,15 @@ def find_recommender(recommender):
 if __name__ == '__main__':
     data_dir = "/home/yjx/projects/GCPR/dataset/"
     root_dir = "/home/yjx/projects/GCPR/"
-    configurator = Configurator(root_dir, data_dir)
-    configurator.add_config(root_dir + "NeuRec.ini", section="NeuRec")
-    configurator.parse_cmd()
+    config = Configurator(root_dir, data_dir)
+    config.add_config(root_dir + "NeuRec.ini", section="NeuRec")
+    config.parse_cmd()
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(configurator.gpu_id)
-    _set_random_seed(configurator.seed)
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(config.gpu_id)
+    _set_random_seed(config.seed)
 
-    model_cfg_file = os.path.join(root_dir + "conf", configurator.recommender + ".ini")
-    configurator.add_config(model_cfg_file, section="hyperparameters")
+    model_cfg_file = os.path.join(root_dir + "conf", config.recommender + ".ini")
+    config.add_config(model_cfg_file, section="hyperparameters")
 
-    model = SGL(configurator)
-    model.train_model()
+    model = SGL(config)
+    model.train_model(config.CPRMode)
