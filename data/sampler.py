@@ -37,7 +37,7 @@ class PairwiseSamplerV2(Sampler):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.drop_last = drop_last
-
+        self.num_neg = num_neg
         self.num_items = dataset.num_items
         self.user_pos_dict = dataset.to_user_dict()  # OrderedDict([int]DataFrame)
         self.num_trainings = sum([len(items) for _, items in self.user_pos_dict.items()])
@@ -48,7 +48,7 @@ class PairwiseSamplerV2(Sampler):
         return (self.num_trainings - 1 + self.batch_size) // self.batch_size
 
     def __iter__(self):
-        user_arr = np.array(self.user_pos_dict.keys(), dtype=np.int32)
+        user_arr = np.array(list(self.user_pos_dict.keys()), dtype=np.int32)
         user_idx = randint_choice(len(user_arr), size=self.num_trainings, replace=True)
         user_list = user_arr[user_idx]
 
@@ -59,25 +59,26 @@ class PairwiseSamplerV2(Sampler):
 
         user_pos_sample = dict()
         user_neg_sample = dict()
-
         # 对每个user采样正样本和负样本
         for user, pos_len in user_pos_len.items():
             try:
-                pos_items = self.user_pos_dict[user]  # DataFrame
-                pos_idx = randint_choice(len(pos_items), size=pos_len, replace=True)
+                pos_items = self.user_pos_dict[user]
+                if len(pos_items) == 1:
+                    pos_idx = [0] * pos_len
+                else:
+                    pos_idx = randint_choice(len(pos_items), size=pos_len, replace=True)
                 pos_idx = pos_idx if isinstance(pos_idx, Iterable) else [pos_idx]
                 user_pos_sample[user] = list(pos_items[pos_idx])
 
-                # 从dataset.num_items中删除pos_items就是neg_items的可选值
-                neg_items = randint_choice(self.num_items, size=pos_len, replace=True, exclusion=pos_items)
+                neg_items = randint_choice(self.num_items, size=pos_len, replace=True, exclusion=self.user_pos_dict[user])
                 user_neg_sample[user] = neg_items if isinstance(neg_items, Iterable) else [neg_items]
             except:
-                print("Sampling Error")
+                print(user, 'error')
 
         pos_item_list = [user_pos_sample[user].pop() for user in user_list]
         neg_item_list = [user_neg_sample[user].pop() for user in user_list]
         # 得到 user_list, pos_item_list, neg_item_list
 
-        data_iter = DataIterator(user_list, pos_item_list, neg_item_list)
+        data_iter = DataIterator(user_list, pos_item_list, neg_item_list, batch_size=self.batch_size, shuffle=self.shuffle, drop_last=self.drop_last)
         for bat_users, bat_pos_items, bat_neg_items in data_iter:
             yield np.asarray(bat_users), np.asarray(bat_pos_items), np.asarray(bat_neg_items)

@@ -2,8 +2,7 @@
 *.so
 *.pyc
 *.log
-.idea/
-.vscode/
-__pycache__
-test.py
+/.idea/
+/.vscode/
+__pycache__/
 build/

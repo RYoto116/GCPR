@@ -6,7 +6,7 @@ from importlib.util import find_spec
 from importlib import import_module
 from reckit.configurator import Configurator
 from reckit.util.decorators import typeassert
-from reckit.model.SGL import SGL
+from reckit.model.GCPR import GCPR
 
 import faulthandler
 
@@ -25,15 +25,11 @@ def _set_random_seed(seed=2023):
 
 @typeassert(recommender=str)
 def find_recommender(recommender):
-    model_dirs = set(os.listdir("model"))
-    model_dirs.remove("base")
-
+    spec_path = ".".join(["reckit.model", recommender])
     module = None
-    for tdir in model_dirs:
-        spec_path = ".".join(["model", tdir, recommender])
-        if find_spec(spec_path):
-            module = import_module(spec_path)
-            break
+    
+    if find_spec(spec_path):
+        module = import_module(spec_path)
 
     if module is None:
         raise ImportError(f"Recommender: {recommender} not found")
@@ -46,15 +42,17 @@ def find_recommender(recommender):
 if __name__ == '__main__':
     data_dir = "/home/yjx/projects/GCPR/dataset/"
     root_dir = "/home/yjx/projects/GCPR/"
-    configurator = Configurator(root_dir, data_dir)
-    configurator.add_config(root_dir + "NeuRec.ini", section="NeuRec")
-    configurator.parse_cmd()
+    config = Configurator(root_dir, data_dir)
+    config.add_config(root_dir + "NeuRec.ini", section="NeuRec")
+    config.parse_cmd()
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(configurator.gpu_id)
-    _set_random_seed(configurator.seed)
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(config.gpu_id)
+    _set_random_seed(config.seed)
+    
+    Recommender = find_recommender(config.recommender)
 
-    model_cfg_file = os.path.join(root_dir + "conf", configurator.recommender + ".ini")
-    configurator.add_config(model_cfg_file, section="hyperparameters")
+    model_cfg_file = os.path.join(root_dir + "conf", config.recommender + ".ini")
+    config.add_config(model_cfg_file, section="hyperparameters")
 
-    model = SGL(configurator)
+    model = Recommender(config)
     model.train_model()

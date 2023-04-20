@@ -5,6 +5,7 @@ from collections import OrderedDict
 import warnings
 from copy import deepcopy
 from reckit.util.decorators import typeassert
+import scipy.sparse as sp
 
 _USER = "user"
 _ITEM = "item"
@@ -44,6 +45,15 @@ class Interaction(object):
 
         self._buffer["user_dict"] = deepcopy(user_dict)
         return user_dict
+    
+    def to_csr_matrix(self):
+        if self._data.empty:
+            warnings.warn("self._data is empty.")
+            return None
+        users, items = self._data[_USER].to_numpy(), self._data[_ITEM].to_numpy()
+        ratings = np.ones(len(users), dtype=np.float32)
+        csr_mat = sp.csr_matrix((ratings, (users, items)), shape=(self.num_users, self.num_items))
+        return csr_mat
 
     def to_user_item_pairs(self):
         if self._data.empty:
@@ -63,10 +73,10 @@ class Dataset(object):
         self.train_data = Interaction()
         self.valid_data = Interaction()
         self.test_data = Interaction()
-        self.user2id = None
-        self.item2id = None
-        self.id2user = None
-        self.id2item = None
+        # self.user2id = None
+        # self.item2id = None
+        # self.id2user = None
+        # self.id2item = None
 
         self.num_users = 0
         self.num_items = 0
@@ -97,21 +107,21 @@ class Dataset(object):
         else:
             raise FileNotFoundError(f"{test_file} does not exist.")
 
-        user2id_file = prefix + ".user2id"
-        if os.path.isfile(user2id_file):
-            _user2id = pd.read_csv(user2id_file, sep=sep, header=None, names=columns)
-            self.user2id = OrderedDict(_user2id)
-            self.id2user = OrderedDict([(idx, user) for user, idx in self.user2id.items()])
-        else:
-            warnings.warn(f"{user2id_file} does not exist.")
+        # user2id_file = prefix + ".user2id"
+        # if os.path.isfile(user2id_file):
+        #     _user2id = pd.read_csv(user2id_file, sep=sep, header=None, names=columns)
+        #     self.user2id = OrderedDict(_user2id)
+        #     self.id2user = OrderedDict([(idx, user) for user, idx in self.user2id.items()])
+        # else:
+        #     warnings.warn(f"{user2id_file} does not exist.")
 
-        item2id_file = prefix + ".item2id"
-        if os.path.isfile(item2id_file):
-            _item2id = pd.read_csv(item2id_file, sep=sep, header=None, names=columns)
-            self.item2id = OrderedDict(_item2id)
-            self.id2item = OrderedDict([(idx, item) for item, idx in self.item2id.items()])
-        else:
-            warnings.warn(f"{item2id_file} does not exist.")
+        # item2id_file = prefix + ".item2id"
+        # if os.path.isfile(item2id_file):
+        #     _item2id = pd.read_csv(item2id_file, sep=sep, header=None, names=columns)
+        #     self.item2id = OrderedDict(_item2id)
+        #     self.id2item = OrderedDict([(idx, item) for item, idx in self.item2id.items()])
+        # else:
+        #     warnings.warn(f"{item2id_file} does not exist.")
 
         data_list = [data for data in [_train_data, _valid_data, _test_data] if not data.empty]
         all_data = pd.concat(data_list)
@@ -124,6 +134,10 @@ class Dataset(object):
         self.train_data = Interaction(_train_data, self.num_users, self.num_items)
         self.valid_data = Interaction(_valid_data, self.num_users, self.num_items)
         self.test_data = Interaction(_test_data, self.num_users, self.num_items)
+        
+        self.train_csr_mat = self.train_data.to_csr_matrix()
+        self.item_degrees = self._count_item_frequency()
+        # self.user_degrees = self._count_user_frequency()
 
     def __str__(self):
         if 0 in {self.num_users, self.num_items, self.num_ratings}:
@@ -151,3 +165,11 @@ class Dataset(object):
 
     def __repr__(self):
         return self.__str__()
+
+    def _count_item_frequency(self):
+        colsum = np.array(self.train_csr_mat.sum(0))
+        return np.squeeze(colsum)
+
+    def _count_user_frequency(self):
+        rowsum = np.array(self.train_csr_mat.sum(1))
+        return np.squeeze(rowsum)
