@@ -46,6 +46,7 @@ class LightGCN(nn.Module):
         neg_item_embs = F.embedding(neg_items, item_embeddings)
         
         cpr_embs = [user_embs, item_embs, neg_item_embs]
+        
         user_embs1 = F.embedding(users, user_embeddings1)    # [batch_size, embedding_size]
         item_embs1 = F.embedding(items, item_embeddings1)    # [batch_size, embedding_size]
         user_embs2 = F.embedding(users, user_embeddings2)    # [batch_size, embedding_size]
@@ -141,19 +142,6 @@ class GCPR(AbstractRecommender):
                          '/1ratio=%.f-mode=%s-temp=%.2f-reg=%.0e' \
                          % (self.ssl_ratio, self.ssl_mode, self.ssl_temp, self.ssl_reg)
                          
-        # self.pretrain_flag = config["pretrain_flag"]
-        # if self.pretrain_flag:
-        #     self.epochs = 0
-        # self.save_flag = config["save_flag"]
-        # self.save_dir, self.tmp_model_dir = None, None
-        # if self.pretrain_flag or self.save_flag:
-        #     self.tmp_model_dir = config.data_dir + '%s/model_tmp/%s/%s/' \
-        #                          % (self.dataset_name, self.model_name, self.model_str)
-        #     self.save_dir = config.data_dir + '%s/pretrain-embeddings/%s/n_layers=%d/' \
-        #                     % (self.dataset_name, self.model_name,self.n_layers,)
-        #     ensureDir(self.tmp_model_dir)
-        #     ensureDir(self.save_dir)
-
         self.num_users, self.num_items, self.num_ratings = self.dataset.num_users, self.dataset.num_items, self.dataset.num_train_ratings
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         adj_matrix = self.create_adj_mat()
@@ -265,7 +253,7 @@ class GCPR(AbstractRecommender):
                 bat_neg_items = torch.from_numpy(bat_neg_items).long().to(self.device)  # [batch_size]
 
                 _, ssl_logits_user, ssl_logits_item, cpr_embs = self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_items, bat_neg_items)
-                
+                # ssl_logits_user [batch_size, num_users], ssl_logits_item [batch_size, num_items]
                 batch_user_embeds, batch_pos_item_embeds, batch_neg_item_embeds = cpr_embs
                 
                 u_splits = torch.split(batch_user_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
@@ -336,7 +324,7 @@ class GCPR(AbstractRecommender):
         flag = False
         self.lightgcn.eval()  # 得到self._user_embeddings_final 和 self._item_embeddings_final
         current_result, buf = self.evaluator.evaluate(self)
-        if self.best_result[1] < current_result[1]:
+        if self.best_result[0] < current_result[0]:
             self.best_result = current_result
             flag = True
         return buf, flag
