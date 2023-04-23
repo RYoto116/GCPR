@@ -6,7 +6,6 @@ from importlib.util import find_spec
 from importlib import import_module
 from reckit.configurator import Configurator
 from reckit.util.decorators import typeassert
-from reckit.model.GCPR import GCPR
 
 import faulthandler
 
