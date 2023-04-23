@@ -21,7 +21,7 @@ class Interaction(object):
     @typeassert(data=(pd.DataFrame, None), num_users=(int, None), num_items=(int, None))
     def __init__(self, data=None, num_users=None, num_items=None):
         if data is None or data.empty:
-            self._data = pd.DataFrame
+            self._data = pd.DataFrame()
             self.num_users = 0
             self.num_items = 0
             self.num_ratings = 0
@@ -99,7 +99,7 @@ class Dataset(object):
             _valid_data = pd.read_csv(valid_file, sep=sep, header=None, names=columns)
         else:
             _valid_data = pd.DataFrame()
-            warnings.warn(f"{valid_file} does not exist.")
+            warnings.warn("valid_file does not exist.")
 
         test_file = prefix + ".test"
         if os.path.isfile(test_file):
@@ -137,7 +137,6 @@ class Dataset(object):
         
         self.train_csr_mat = self.train_data.to_csr_matrix()
         self.item_degrees = self._count_item_frequency()
-        # self.user_degrees = self._count_user_frequency()
 
     def __str__(self):
         if 0 in {self.num_users, self.num_items, self.num_ratings}:
