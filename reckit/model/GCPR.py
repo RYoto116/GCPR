@@ -45,26 +45,28 @@ class LightGCN(nn.Module):
         item_embs = F.embedding(items, item_embeddings)      # [batch_size, embedding_size]
         neg_item_embs = F.embedding(neg_items, item_embeddings)
         
-        cpr_embs = [user_embs, item_embs, neg_item_embs]
+        return [user_embs, item_embs, neg_item_embs], [user_embeddings1, item_embeddings1], [user_embeddings2, item_embeddings2]
         
-        user_embs1 = F.embedding(users, user_embeddings1)    # [batch_size, embedding_size]
-        item_embs1 = F.embedding(items, item_embeddings1)    # [batch_size, embedding_size]
-        user_embs2 = F.embedding(users, user_embeddings2)    # [batch_size, embedding_size]
-        item_embs2 = F.embedding(items, item_embeddings2)    # [batch_size, embedding_size]
+        # cpr_embs = [user_embs, item_embs, neg_item_embs]
+        
+        # user_embs1 = F.embedding(users, user_embeddings1)    # [batch_size, embedding_size]
+        # item_embs1 = F.embedding(items, item_embeddings1)    # [batch_size, embedding_size]
+        # user_embs2 = F.embedding(users, user_embeddings2)    # [batch_size, embedding_size]
+        # item_embs2 = F.embedding(items, item_embeddings2)    # [batch_size, embedding_size]
 
-        sup_pos_ratings = inner_product(user_embs, item_embs)        # [batch_size]
-        sup_neg_ratings = inner_product(user_embs, neg_item_embs)    # [batch_size]
-        sup_logits = sup_pos_ratings - sup_neg_ratings
+        # sup_pos_ratings = inner_product(user_embs, item_embs)        # [batch_size]
+        # sup_neg_ratings = inner_product(user_embs, neg_item_embs)    # [batch_size]
+        # sup_logits = sup_pos_ratings - sup_neg_ratings
 
-        pos_ratings_user = inner_product(user_embs1, user_embs2)     # [batch_size]
-        pos_ratings_item = inner_product(item_embs1, item_embs2)     # [batch_size]
-        tot_ratings_user = torch.matmul(user_embs1, torch.transpose(user_embeddings2, 0, 1))    # [batch_size, num_users]
-        tot_ratings_item = torch.matmul(item_embs1, torch.transpose(item_embeddings2, 0, 1))    # [batch_size, num_items]
+        # pos_ratings_user = inner_product(user_embs1, user_embs2)     # [batch_size]
+        # pos_ratings_item = inner_product(item_embs1, item_embs2)     # [batch_size]
+        # tot_ratings_user = torch.matmul(user_embs1, torch.transpose(user_embeddings2, 0, 1))    # [batch_size, num_users]
+        # tot_ratings_item = torch.matmul(item_embs1, torch.transpose(item_embeddings2, 0, 1))    # [batch_size, num_items]
 
-        ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
-        ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
+        # ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
+        # ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
 
-        return sup_logits, ssl_logits_user, ssl_logits_item, cpr_embs 
+        # return sup_logits, ssl_logits_user, ssl_logits_item, cpr_embs 
 
     def _forward_gcn(self, norm_adj):
         ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
@@ -235,8 +237,9 @@ class GCPR(AbstractRecommender):
                     else:
                         split_indices.append(data_iter.batch_total_sample_sizes[i] + split_indices[i-1])                        
                 
-                bat_items_splits = np.split(bat_items, split_indices, 0)[:-1]
-                bat_neg_items = copy.deepcopy(bat_items_splits)
+                bat_user_list = copy.deepcopy(np.split(bat_users, split_indices, 0)[:-1])
+                bat_item_list = copy.deepcopy(np.split(bat_items, split_indices, 0)[:-1])
+                bat_neg_items = copy.deepcopy(np.split(bat_items, split_indices, 0)[:-1])
                 
                 for idx in range(len(split_indices)):
                     # idx = 0: bat_items_list = [i1, i2]
@@ -252,9 +255,9 @@ class GCPR(AbstractRecommender):
                 bat_items = torch.from_numpy(bat_items).long().to(self.device)          # [batch_size]
                 bat_neg_items = torch.from_numpy(bat_neg_items).long().to(self.device)  # [batch_size]
 
-                _, ssl_logits_user, ssl_logits_item, cpr_embs = self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_items, bat_neg_items)
-                # ssl_logits_user [batch_size, num_users], ssl_logits_item [batch_size, num_items]
-                batch_user_embeds, batch_pos_item_embeds, batch_neg_item_embeds = cpr_embs
+                [batch_user_embeds, batch_pos_item_embeds, batch_neg_item_embeds], \
+                [ssl_user_embeds1, ssl_item_embeds1], [ssl_user_embeds2, ssl_item_embeds2] = \
+                    self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_items, bat_neg_items)
                 
                 u_splits = torch.split(batch_user_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
                 i_splits = torch.split(batch_pos_item_embeds, tuple(data_iter.batch_total_sample_sizes), 0)
@@ -262,7 +265,6 @@ class GCPR(AbstractRecommender):
                 
                 pos_scores = []
                 neg_scores = []
-
                 for idx in range(len(data_iter.batch_total_sample_sizes)):
                     u_list = np.split(u_splits[idx], idx+2, 0)
                     i_list = np.split(i_splits[idx], idx+2, 0)
@@ -270,20 +272,58 @@ class GCPR(AbstractRecommender):
                     
                     pos_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_list)]), axis=0))
                     neg_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_neg_list)]), axis=0))
-
                 pos_scores = torch.concat(pos_scores, axis=0)
                 neg_scores = torch.concat(neg_scores, axis=0)
                 
                 # CPR Loss
-                cpr = cpr_loss(pos_scores, neg_scores, self.batch_size, self.sample_rate)
-                
-                # Reg Loss
-                reg_loss = l2_loss(batch_user_embeds, batch_pos_item_embeds, batch_neg_item_embeds)
+                cpr, bat_idx = cpr_loss(pos_scores, neg_scores, self.batch_size, self.sample_rate)
                 
                 # InfoNCE Loss
-                clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
-                clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
-                infonce_loss = torch.sum(clogits_user + clogits_item)
+                if bat_idx is not None:
+                    ssl_users = []
+                    ssl_items = []
+                    # 遍历batch
+                    for i in range(len(bat_idx)):
+                        # k=2
+                        if bat_idx[i] < data_iter.batch_sample_sizes[0]:
+                            length = 0
+                            while length < data_iter.batch_total_sample_sizes[0]:
+                                ssl_users.append(bat_user_list[0][bat_idx[i]+length])
+                                ssl_items.append(bat_item_list[0][bat_idx[i]+length])
+                                length += data_iter.batch_sample_sizes[0]
+                        # k=3
+                        else:
+                            length = 0
+                            while length < data_iter.batch_total_sample_sizes[1]:
+                                ssl_users.append(bat_user_list[1][bat_idx[i]-data_iter.batch_sample_sizes[0]+length])
+                                ssl_items.append(bat_item_list[1][bat_idx[i]-data_iter.batch_sample_sizes[0]+length])
+                                length += data_iter.batch_sample_sizes[1]
+                    
+                    ssl_users = torch.IntTensor(list(set(ssl_users))).to(self.device)
+                    ssl_items = torch.IntTensor(list(set(ssl_items))).to(self.device)
+                    ssl_user_embeds1 = F.embedding(ssl_users, ssl_user_embeds1)    # [batch_size, embedding_size]
+                    ssl_item_embeds1 = F.embedding(ssl_items, ssl_item_embeds1)    # [batch_size, embedding_size]
+                    ssl_user_embeds2 = F.embedding(ssl_users, ssl_user_embeds2)    # [batch_size, embedding_size]
+                    ssl_item_embeds2 = F.embedding(ssl_items, ssl_item_embeds2)    # [batch_size, embedding_size]                
+                
+                pos_ratings_user = inner_product(ssl_user_embeds1, ssl_user_embeds2) # [batch_size]
+                pos_ratings_item = inner_product(ssl_item_embeds1, ssl_item_embeds2) # [batch_size]
+                tot_ratings_user = torch.matmul(ssl_user_embeds1, torch.transpose(ssl_user_embeds2, 0, 1))    # [batch_size, num_users]
+                tot_ratings_item = torch.matmul(ssl_item_embeds1, torch.transpose(ssl_item_embeds2, 0, 1))    # [batch_size, num_items]
+                ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
+                ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
+
+                clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1).sum()
+                clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1).sum()
+                infonce_loss = clogits_user + clogits_item
+                
+                # Reg Loss
+                reg_loss = l2_loss(
+                    self.lightgcn.user_embeddings(bat_users),
+                    self.lightgcn.item_embeddings(bat_items),
+                    self.lightgcn.item_embeddings(bat_neg_items),
+                )
+
                 loss = cpr + self.reg * reg_loss + self.ssl_reg * infonce_loss
                 
                 total_loss += loss
