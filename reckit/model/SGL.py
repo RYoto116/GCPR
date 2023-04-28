@@ -4,6 +4,7 @@ import numpy as np
 import scipy.sparse as sp
 from reckit.model.abstract_recommender import AbstractRecommender
 from reckit.rand import randint_choice
+from reckit.util import inner_product
 from data import PairwiseSamplerV2
 from time import time
 from reckit.util import l2_loss
@@ -134,9 +135,20 @@ class SGL(AbstractRecommender):
                 bat_users = torch.from_numpy(bat_users).long().to(self.device)
                 bat_pos_items = torch.from_numpy(bat_pos_items).long().to(self.device)
                 bat_neg_items = torch.from_numpy(bat_neg_items).long().to(self.device)
-                sup_logits, ssl_logits_user, ssl_logits_item, _ = self.lightgcn(
-                    sub_graph1, sub_graph2, bat_users, bat_pos_items, bat_neg_items)
                 
+                [user_embeddings, item_embeddings], \
+                    [user_embeddings1, item_embeddings1], \
+                        [user_embeddings2, item_embeddings2] = \
+                            self.lightgcn(sub_graph1, sub_graph2, bat_users, bat_pos_items, bat_neg_items)
+
+                user_embs = F.embedding(bat_users, user_embeddings)      # [batch_size, embedding_size]
+                item_embs = F.embedding(bat_pos_items, item_embeddings)      # [batch_size, embedding_size]
+                neg_item_embs = F.embedding(bat_neg_items, item_embeddings)
+
+                sup_pos_ratings = inner_product(user_embs, item_embs)        # [batch_size]
+                sup_neg_ratings = inner_product(user_embs, neg_item_embs)    # [batch_size]
+                sup_logits = sup_pos_ratings - sup_neg_ratings
+
                 # BPR Loss
                 bpr_loss = -torch.sum(F.logsigmoid(sup_logits))
 
@@ -148,6 +160,19 @@ class SGL(AbstractRecommender):
                 )
 
                 # InfoNCE Loss
+                user_embs1 = F.embedding(bat_users, user_embeddings1)    # [batch_size, embedding_size]
+                item_embs1 = F.embedding(bat_pos_items, item_embeddings1)    # [batch_size, embedding_size]
+                user_embs2 = F.embedding(bat_users, user_embeddings2)    # [batch_size, embedding_size]
+                item_embs2 = F.embedding(bat_pos_items, item_embeddings2)    # [batch_size, embedding_size]
+
+                pos_ratings_user = inner_product(user_embs1, user_embs2)     # [batch_size]
+                pos_ratings_item = inner_product(item_embs1, item_embs2)     # [batch_size]
+                tot_ratings_user = torch.matmul(user_embs1, torch.transpose(user_embeddings2, 0, 1))    # [batch_size, num_users]
+                tot_ratings_item = torch.matmul(item_embs1, torch.transpose(item_embeddings2, 0, 1))    # [batch_size, num_items]
+
+                ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
+                ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
+
                 clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
                 clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
                 infonce_loss = torch.sum(clogits_user + clogits_item)
@@ -190,7 +215,7 @@ class SGL(AbstractRecommender):
         flag = False
         self.lightgcn.eval()  # 得到self._user_embeddings_final 和 self._item_embeddings_final
         current_result, buf = self.evaluator.evaluate(self)
-        if self.best_result[1] < current_result[1]:
+        if self.best_result[0] < current_result[0]:
             self.best_result = current_result
             flag = True
         return buf, flag
