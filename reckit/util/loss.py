@@ -16,6 +16,6 @@ def cpr_loss(pos_scores, neg_scores, batch_size, sample_rate):
         cpr_obj_neg = -cpr_obj
         bat_idx = None
     else:
-        cpr_obj_neg, bat_idx = torch.topk(-cpr_obj, k=batch_size, sorted=False)
+        cpr_obj_neg = torch.topk(-cpr_obj, k=batch_size, sorted=False)
     loss = torch.sum(torch.nn.functional.softplus(cpr_obj_neg))
-    return loss, bat_idx
+    return loss
