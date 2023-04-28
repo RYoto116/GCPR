@@ -43,6 +43,7 @@ class LightGCN(nn.Module):
 
         return [user_embeddings, item_embeddings], [user_embeddings1, item_embeddings1], [user_embeddings2, item_embeddings2]
 
+
     def _forward_gcn(self, norm_adj):
         ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
         all_embeddings = [ego_embeddings]
@@ -212,8 +213,9 @@ class GCPR(AbstractRecommender):
                     else:
                         split_indices.append(data_iter.batch_total_sample_sizes[i] + split_indices[i-1])                        
                 
-                bat_items_splits = np.split(bat_items, split_indices, 0)[:-1]
-                bat_neg_items = copy.deepcopy(bat_items_splits)
+                bat_user_list = copy.deepcopy(np.split(bat_users, split_indices, 0)[:-1])
+                bat_item_list = copy.deepcopy(np.split(bat_items, split_indices, 0)[:-1])
+                bat_neg_items = copy.deepcopy(np.split(bat_items, split_indices, 0)[:-1])
                 
                 for idx in range(len(split_indices)):
                     # idx = 0: bat_items_list = [i1, i2]
@@ -245,7 +247,6 @@ class GCPR(AbstractRecommender):
                 
                 pos_scores = []
                 neg_scores = []
-
                 for idx in range(len(data_iter.batch_total_sample_sizes)):
                     u_list = np.split(u_splits[idx], idx+2, 0)
                     i_list = np.split(i_splits[idx], idx+2, 0)
@@ -253,7 +254,6 @@ class GCPR(AbstractRecommender):
                     
                     pos_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_list)]), axis=0))
                     neg_scores.append(torch.mean(torch.stack([inner_product(u, i) for u, i in zip(u_list, i_neg_list)]), axis=0))
-
                 pos_scores = torch.concat(pos_scores, axis=0)
                 neg_scores = torch.concat(neg_scores, axis=0)
                 
