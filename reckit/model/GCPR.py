@@ -245,4 +245,4 @@ def InfoNCE(view1, view2, temperature):
     ttl_score = torch.matmul(view1, view2.transpose(0, 1))
     ttl_score = torch.exp(ttl_score / temperature).sum(dim=1)
     cl_loss = -torch.log(pos_score / ttl_score+10e-6)
-    return torch.mean(cl_loss)
+    return torch.sum(cl_loss)
