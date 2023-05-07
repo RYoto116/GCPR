@@ -121,7 +121,7 @@ class GCPR(AbstractRecommender):
                          % (self.ssl_ratio, self.ssl_mode, self.ssl_temp, self.ssl_reg)
                          
         self.num_users, self.num_items, self.num_ratings = self.dataset.num_users, self.dataset.num_items, self.dataset.num_train_ratings
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         adj_matrix = self.create_adj_mat()
         adj_matrix = sp_mat_to_sp_tensor(adj_matrix).to(self.device)
 
@@ -213,8 +213,6 @@ class GCPR(AbstractRecommender):
                     else:
                         split_indices.append(data_iter.batch_total_sample_sizes[i] + split_indices[i-1])                        
                 
-                bat_user_list = copy.deepcopy(np.split(bat_users, split_indices, 0)[:-1])
-                bat_item_list = copy.deepcopy(np.split(bat_items, split_indices, 0)[:-1])
                 bat_neg_items = copy.deepcopy(np.split(bat_items, split_indices, 0)[:-1])
                 
                 for idx in range(len(split_indices)):
@@ -275,17 +273,21 @@ class GCPR(AbstractRecommender):
                 user_embs2 = F.embedding(users, user_embeddings2)    # [batch_size, embedding_size]
                 item_embs2 = F.embedding(items, item_embeddings2)    # [batch_size, embedding_size]
 
-                pos_ratings_user = inner_product(user_embs1, user_embs2)     # [batch_size]
-                pos_ratings_item = inner_product(item_embs1, item_embs2)     # [batch_size]
-                tot_ratings_user = torch.matmul(user_embs1, torch.transpose(user_embeddings2, 0, 1))    # [batch_size, num_users]
-                tot_ratings_item = torch.matmul(item_embs1, torch.transpose(item_embeddings2, 0, 1))    # [batch_size, num_items]
+                user_cl_loss = InfoNCE(user_embs1, user_embs2, self.ssl_temp)
+                item_cl_loss = InfoNCE(item_embs1, item_embs2, self.ssl_temp)
+                
+                # pos_ratings_user = inner_product(user_embs1, user_embs2)     # [batch_size]
+                # pos_ratings_item = inner_product(item_embs1, item_embs2)     # [batch_size]
+                # tot_ratings_user = torch.matmul(user_embs1, torch.transpose(user_embeddings2, 0, 1))    # [batch_size, num_users]
+                # tot_ratings_item = torch.matmul(item_embs1, torch.transpose(item_embeddings2, 0, 1))    # [batch_size, num_items]
 
-                ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
-                ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
+                # ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
+                # ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
 
-                clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
-                clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
-                infonce_loss = torch.sum(clogits_user) + torch.sum(clogits_item)
+                # clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
+                # clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
+                
+                infonce_loss = user_cl_loss + item_cl_loss
                 
                 loss = cpr + self.reg * reg_loss + self.ssl_reg * infonce_loss
                 
@@ -335,3 +337,11 @@ class GCPR(AbstractRecommender):
     def predict(self, users):
         users = torch.from_numpy(np.asarray(users)).long().to(self.device)
         return self.lightgcn.predict(users).cpu().detach().numpy()  # ratings
+
+def InfoNCE(view1, view2, temperature):
+    pos_score = (view1 * view2).sum(dim=-1)
+    pos_score = torch.exp(pos_score / temperature)
+    ttl_score = torch.matmul(view1, view2.transpose(0, 1))
+    ttl_score = torch.exp(ttl_score / temperature).sum(dim=1)
+    cl_loss = -torch.log(pos_score / ttl_score+10e-6)
+    return torch.mean(cl_loss)
