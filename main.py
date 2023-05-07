@@ -6,10 +6,10 @@ from importlib.util import find_spec
 from importlib import import_module
 from reckit.configurator import Configurator
 from reckit.util.decorators import typeassert
-
 import faulthandler
 
 faulthandler.enable()
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
 def _set_random_seed(seed=2023):
     np.random.seed(seed)

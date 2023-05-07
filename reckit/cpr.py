@@ -68,7 +68,7 @@ class CPRSampler(object):
         self.batch_sample_size = np.sum(self.batch_total_sample_sizes)
         self.sample_size = self.n_step * self.batch_sample_size
 
-        self.batch_choice_sizes = 3 * self.batch_sample_sizes  # gamma默认为2
+        self.batch_choice_sizes = 3 * self.batch_sample_sizes  # gamma默认为3
         self.choice_size = 3 * self.sample_size
 
         self.users = np.empty(self.sample_size, dtype=np.int32)
