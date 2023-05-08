@@ -9,7 +9,6 @@ from reckit import CPRSampler
 from time import time
 from reckit.util import l2_loss, cpr_loss
 from reckit.util import timer
-import copy
 import warnings
 from reckit.util import inner_product
 from reckit.util import sp_mat_to_sp_tensor
@@ -201,7 +200,7 @@ class GCPR(AbstractRecommender):
                 loss.backward()
                 self.optimizer.step()
 
-            self.logger.info("[iter %d : loss : %.4f = %.4f + %.4f + %.4f, time: %f]" % (
+            self.logger.info("[iter %d : loss : %.6f = %.6f + %.6f + %.6f, time: %f]" % (
                 epoch, 
                 total_loss/ self.num_ratings,
                 total_sup_loss / self.num_ratings,
@@ -230,7 +229,7 @@ class GCPR(AbstractRecommender):
         flag = False
         self.lightgcn.eval()  # 得到self._user_embeddings_final 和 self._item_embeddings_final
         current_result, buf = self.evaluator.evaluate(self)
-        if self.best_result[0] < current_result[0]:
+        if self.best_result[1] < current_result[1]:
             self.best_result = current_result
             flag = True
         return buf, flag
