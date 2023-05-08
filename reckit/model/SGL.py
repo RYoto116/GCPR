@@ -134,7 +134,7 @@ class SGL(AbstractRecommender):
                 pos_idx = torch.from_numpy(pos_idx).long().to(self.device)
                 neg_idx = torch.from_numpy(neg_idx).long().to(self.device)
                 
-                rec_user_emb, rec_item_emb = self.lightgcn(sub_graph1, sub_graph2, user_idx, pos_idx, neg_idx)
+                rec_user_emb, rec_item_emb = self.lightgcn()
                 user_emb, pos_item_emb, neg_item_emb = rec_user_emb[user_idx], rec_item_emb[pos_idx], rec_item_emb[neg_idx]
 
                 # user_emb = F.embedding(user_idx, user_embeddings)      # [batch_size, embedding_size]
@@ -156,24 +156,16 @@ class SGL(AbstractRecommender):
                 )
 
                 # InfoNCE Loss
-                # user_embs1 = F.embedding(user_idx, user_embeddings1)    # [batch_size, embedding_size]
-                # item_embs1 = F.embedding(pos_idx, item_embeddings1)    # [batch_size, embedding_size]
-                # user_embs2 = F.embedding(user_idx, user_embeddings2)    # [batch_size, embedding_size]
-                # item_embs2 = F.embedding(pos_idx, item_embeddings2)    # [batch_size, embedding_size]
+                u_idx = torch.unique(user_idx)
+                i_idx = torch.unique(pos_idx)
 
-                # pos_ratings_user = inner_product(user_embs1, user_embs2)     # [batch_size]
-                # pos_ratings_item = inner_product(item_embs1, item_embs2)     # [batch_size]
-                # tot_ratings_user = torch.matmul(user_embs1, torch.transpose(user_embeddings2, 0, 1))    # [batch_size, num_users]
-                # tot_ratings_item = torch.matmul(item_embs1, torch.transpose(item_embeddings2, 0, 1))    # [batch_size, num_items]
+                user_view_1, item_view_1 = self.lightgcn.forward(sub_graph1)
+                user_view_2, item_view_2 = self.lightgcn.forward(sub_graph2)
 
-                # ssl_logits_user = tot_ratings_user - pos_ratings_user[:, None]
-                # ssl_logits_item = tot_ratings_item - pos_ratings_item[:, None]
-
-                # clogits_user = torch.logsumexp(ssl_logits_user / self.ssl_temp, dim=1)
-                # clogits_item = torch.logsumexp(ssl_logits_item / self.ssl_temp, dim=1)
-                # infonce_loss = torch.sum(clogits_user + clogits_item)
-
-                cl_loss = self.ssl_reg * self.lightgcn.cal_cl_loss([user_idx, pos_idx], sub_graph1, sub_graph2)
+                view1 = torch.cat((user_view_1[u_idx],item_view_1[i_idx]), 0)
+                view2 = torch.cat((user_view_2[u_idx],item_view_2[i_idx]), 0)
+                
+                cl_loss = self.ssl_reg * InfoNCE(view1, view2, self.ssl_temp)
                 
                 loss = bpr_loss + cl_loss + self.reg * reg_loss
                 total_loss += loss
@@ -247,11 +239,11 @@ class SGL_Encoder(nn.Module):
                 else:
                     ego_embeddings = torch.sparse.mm(perturbed_adj, ego_embeddings)
             else:
-                ego_embeddings = torch.sparse.mm(self.sparse_norm_adj, ego_embeddings)
+                ego_embeddings = torch.sparse.mm(self.norm_adj, ego_embeddings)
             all_embeddings.append(ego_embeddings)
         all_embeddings = torch.stack(all_embeddings, dim=1)
         all_embeddings = torch.mean(all_embeddings, dim=1)
-        user_all_embeddings, item_all_embeddings = torch.split(all_embeddings, [self.data.user_num, self.data.item_num])
+        user_all_embeddings, item_all_embeddings = torch.split(all_embeddings, [self.num_users, self.num_items])
         return user_all_embeddings, item_all_embeddings
 
     def predict(self, users):
