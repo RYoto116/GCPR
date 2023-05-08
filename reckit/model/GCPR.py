@@ -4,10 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 import scipy.sparse as sp
 from reckit.model.abstract_recommender import AbstractRecommender
-from reckit.rand import randint_choice
 from reckit import CPRSampler
 from time import time
-from reckit.util import l2_loss, cpr_loss
+from reckit.util import l2_loss, cpr_loss, InfoNCE
 from reckit.util import timer
 import warnings
 from reckit.util import inner_product
@@ -238,11 +237,11 @@ class GCPR(AbstractRecommender):
         users = torch.from_numpy(np.asarray(users)).long().to(self.device)
         return self.lightgcn.predict(users).cpu().detach().numpy()  # ratings
 
-def InfoNCE(view1, view2, temperature):
-    view1, view2 = F.normalize(view1, dim=1), F.normalize(view2, dim=1)
-    pos_score = (view1 * view2).sum(dim=-1)
-    pos_score = torch.exp(pos_score / temperature)
-    ttl_score = torch.matmul(view1, view2.transpose(0, 1))
-    ttl_score = torch.exp(ttl_score / temperature).sum(dim=1)
-    cl_loss = -torch.log(pos_score / ttl_score+10e-6)
-    return torch.sum(cl_loss)
+# def InfoNCE(view1, view2, temperature):
+#     view1, view2 = F.normalize(view1, dim=1), F.normalize(view2, dim=1)
+#     pos_score = (view1 * view2).sum(dim=-1)
+#     pos_score = torch.exp(pos_score / temperature)
+#     ttl_score = torch.matmul(view1, view2.transpose(0, 1))
+#     ttl_score = torch.exp(ttl_score / temperature).sum(dim=1)
+#     cl_loss = -torch.log(pos_score / ttl_score+10e-6)
+#     return torch.sum(cl_loss)
