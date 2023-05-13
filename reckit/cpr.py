@@ -30,9 +30,7 @@ class CPRSampler(object):
     def __init__(self, dataset, sample_ratio, sample_rate, batch_size=1024, n_thread=4, k_interact=None, max_k_interact=3, drop_last=False):
         """
         CPR采样
-        :param dataset: Interaction
-        :param batch_size:
-        :param n_thread:
+            dataset: Interaction
         """
         self.batch_size = batch_size
         self.n_thread = n_thread

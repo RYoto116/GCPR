@@ -14,13 +14,14 @@ from reckit.util import sp_mat_to_sp_tensor
 from reckit.util import get_initializer
  
 class LightGCN(nn.Module):
-    def __init__(self, num_users, num_items, embedding_size, norm_adj, n_layers=3):
+    def __init__(self, num_users, num_items, embedding_size, norm_adj, n_layers=3, hyper_layers=1):
         super(LightGCN, self).__init__()
         self.num_users = num_users
         self.num_items = num_items
         self.embedding_size = embedding_size
         self.norm_adj = norm_adj
         self.n_layers = n_layers
+        self.hyper_layers = hyper_layers
 
         self.user_embeddings = nn.Embedding(self.num_users, self.embedding_size)
         self.item_embeddings = nn.Embedding(self.num_items, self.embedding_size)
@@ -29,19 +30,52 @@ class LightGCN(nn.Module):
         self._item_embeddings_final = None
 
     def forward(self, eps=0, perturbed=False):
+        # ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
+        # all_embeddings = []
+        # for k in range(self.n_layers):
+        #     ego_embeddings = torch.sparse.mm(self.norm_adj, ego_embeddings)
+        #     if perturbed:
+        #         random_noise = torch.rand_like(ego_embeddings).cuda()
+        #         ego_embeddings += torch.sign(ego_embeddings) * F.normalize(random_noise, dim=-1) * eps
+        #     all_embeddings.append(ego_embeddings)
+        # all_embeddings = torch.stack(all_embeddings, dim=1)
+        # all_embeddings = torch.mean(all_embeddings, dim=1)
+        # user_all_embeddings, item_all_embeddings = torch.split(all_embeddings, [self.num_users, self.num_items])
+        # return user_all_embeddings, item_all_embeddings
+        
+        # NCL
+        # ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
+        # all_embeddings = ego_embeddings
+        # embeddings_list = [all_embeddings]
+        # for layer_idx in range(max(self.n_layers, self.hyper_layers*2)):
+        #     all_embeddings = torch.sparse.mm(self.norm_adj, all_embeddings)
+        #     embeddings_list.append(all_embeddings)
+
+        # lightgcn_all_embeddings = torch.stack(embeddings_list[:self.n_layers+1], dim=1)
+        # lightgcn_all_embeddings = torch.mean(lightgcn_all_embeddings, dim=1)
+
+        # user_all_embeddings, item_all_embeddings = torch.split(lightgcn_all_embeddings, [self.num_users, self.num_items])
+        # return user_all_embeddings, item_all_embeddings, embeddings_list
+        
+        # XSimGCL
         ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
         all_embeddings = []
+        cl_embeddings_list = [ego_embeddings]
         for k in range(self.n_layers):
             ego_embeddings = torch.sparse.mm(self.norm_adj, ego_embeddings)
             if perturbed:
                 random_noise = torch.rand_like(ego_embeddings).cuda()
                 ego_embeddings += torch.sign(ego_embeddings) * F.normalize(random_noise, dim=-1) * eps
             all_embeddings.append(ego_embeddings)
-        all_embeddings = torch.stack(all_embeddings, dim=1)
-        all_embeddings = torch.mean(all_embeddings, dim=1)
-        user_all_embeddings, item_all_embeddings = torch.split(all_embeddings, [self.num_users, self.num_items])
+            cl_embeddings_list.append(ego_embeddings)
+        final_embeddings = torch.stack(all_embeddings, dim=1)
+        final_embeddings = torch.mean(final_embeddings, dim=1)
+        user_all_embeddings, item_all_embeddings = torch.split(final_embeddings, [self.num_users, self.num_items])
+        # user_all_embeddings_cl, item_all_embeddings_cl = torch.split(all_embeddings_cl, [self.num_users, self.num_items])
+        if perturbed:
+            return cl_embeddings_list
         return user_all_embeddings, item_all_embeddings
-
+    
     def predict(self, users):
         if self._user_embeddings_final is None or self._item_embeddings_final is None:
             raise ValueError("Please first switch to 'eval' mode.")
@@ -53,7 +87,7 @@ class LightGCN(nn.Module):
 
     def eval(self):
         super(LightGCN, self).eval()
-        self._user_embeddings_final, self._item_embeddings_final = self.forward(self.norm_adj)
+        self._user_embeddings_final, self._item_embeddings_final = self.forward()
 
     def reset_parameters(self, init_method="uniform"):
         init = get_initializer(init_method)
@@ -83,12 +117,14 @@ class GCPR(AbstractRecommender):
 
         # GCN超参数
         self.n_layers = config["n_layers"]
+        self.hyper_layers = config["hyper_layers"]
 
         # 对比学习超参数
         self.ssl_aug_type = config["aug_type"]          # 数据增强方式
         assert self.ssl_aug_type in ['nd', 'ed', 'rw']
         self.eps = config["eps"]
         self.tau = config["tau"]
+        self.alpha = config["alpha"]
         self.cl_reg = config["cl_reg"]
         self.sample_ratio = config["sample_ratio"]
         self.sample_rate = config["sample_rate"]
@@ -103,7 +139,7 @@ class GCPR(AbstractRecommender):
         adj_matrix = self.create_adj_mat()
         adj_matrix = sp_mat_to_sp_tensor(adj_matrix).to(self.device)
 
-        self.lightgcn =LightGCN(self.num_users, self.num_items, self.embedding_size, adj_matrix, self.n_layers).to(self.device)
+        self.lightgcn =LightGCN(self.num_users, self.num_items, self.embedding_size, adj_matrix, self.n_layers, self.hyper_layers).to(self.device)
         self.lightgcn.reset_parameters(init_method=self.param_init)
         self.optimizer = torch.optim.Adam(self.lightgcn.parameters(), lr=self.lr)
 
@@ -153,6 +189,7 @@ class GCPR(AbstractRecommender):
                     cur_idx += size
                 neg_idx = np.concatenate(neg_idx, axis=-1)
                 
+                # all_user_emb, all_item_emb: 每层均值
                 all_user_emb, all_item_emb = self.lightgcn()
                 user_emb, pos_item_emb, neg_item_emb = all_user_emb[user_idx], all_item_emb[pos_idx], all_item_emb[neg_idx]
                 
@@ -175,21 +212,50 @@ class GCPR(AbstractRecommender):
                 # CPR Loss
                 cpr = cpr_loss(pos_scores, neg_scores, self.batch_size, self.sample_rate)
                 
-                # InfoNCE Loss
+                # ssl loss
+                embeddings_list = self.lightgcn(self.eps, True)
                 u_idx = torch.unique(torch.Tensor(user_idx).type(torch.long)).cuda()
                 i_idx = torch.unique(torch.Tensor(pos_idx).type(torch.long)).cuda()
                 
-                user_view_1, item_view_1 = self.lightgcn(self.eps, perturbed=True)
-                user_view_2, item_view_2 = self.lightgcn(self.eps, perturbed=True)
+                # 偶数层：0，2
+                even_previous_embedding = embeddings_list[0]
+                even_current_embedding = embeddings_list[self.hyper_layers*2]
+                
+                even_current_user_embeddings, even_current_item_embeddings = torch.split(even_current_embedding, [self.num_users, self.num_items])
+                even_previous_user_embeddings_all, even_previous_item_embeddings_all = torch.split(even_previous_embedding, [self.num_users, self.num_items])
 
-                user_cl_loss = InfoNCE(user_view_1[u_idx], user_view_2[u_idx], self.tau)
-                item_cl_loss = InfoNCE(item_view_1[i_idx], item_view_2[i_idx], self.tau)                
-                cl_loss = user_cl_loss + item_cl_loss
+                even_current_user_embeddings = even_current_user_embeddings[u_idx]
+                even_previous_user_embeddings = even_previous_user_embeddings_all[u_idx]
+                ssl_even_user_loss = InfoNCE(even_current_user_embeddings, even_previous_user_embeddings, self.tau)
+                
+                even_current_item_embeddings = even_current_item_embeddings[i_idx]
+                even_previous_item_embeddings = even_previous_item_embeddings_all[i_idx]
+                ssl_even_item_loss = InfoNCE(even_current_item_embeddings, even_previous_item_embeddings, self.tau)
+                
+                # 奇数层：1，3
+                odd_previous_embedding = embeddings_list[self.hyper_layers]
+                odd_current_embedding = embeddings_list[self.n_layers]
+                
+                odd_current_user_embeddings, odd_current_item_embeddings = torch.split(odd_current_embedding, [self.num_users, self.num_items])
+                odd_previous_user_embeddings_all, odd_previous_item_embeddings_all = torch.split(odd_previous_embedding, [self.num_users, self.num_items])
 
+                odd_current_user_embeddings = odd_current_user_embeddings[u_idx]
+                odd_previous_user_embeddings = odd_previous_user_embeddings_all[u_idx]
+                ssl_odd_user_loss = InfoNCE(odd_current_user_embeddings, odd_previous_user_embeddings, self.tau)
+                
+                odd_current_item_embeddings = odd_current_item_embeddings[i_idx]
+                odd_previous_item_embeddings = odd_previous_item_embeddings_all[i_idx]
+                ssl_odd_item_loss = InfoNCE(odd_current_item_embeddings, odd_previous_item_embeddings, self.tau)
+                
+                # 合并
+                ssl_loss_user = ssl_even_user_loss + self.alpha * ssl_odd_user_loss
+                ssl_loss_item = ssl_even_item_loss + self.alpha * ssl_odd_item_loss
+                cl_loss = self.cl_reg * (ssl_loss_user + ssl_loss_item)
+                
                 # Reg Loss
                 reg_loss = self.reg * l2_loss(all_user_emb[u_idx], all_item_emb[i_idx])
      
-                loss = cpr + reg_loss + self.cl_reg * cl_loss
+                loss = cpr + reg_loss + cl_loss
                 
                 total_loss += loss
                 total_sup_loss += cpr
@@ -236,12 +302,3 @@ class GCPR(AbstractRecommender):
     def predict(self, users):
         users = torch.from_numpy(np.asarray(users)).long().to(self.device)
         return self.lightgcn.predict(users).cpu().detach().numpy()  # ratings
-
-# def InfoNCE(view1, view2, temperature):
-#     view1, view2 = F.normalize(view1, dim=1), F.normalize(view2, dim=1)
-#     pos_score = (view1 * view2).sum(dim=-1)
-#     pos_score = torch.exp(pos_score / temperature)
-#     ttl_score = torch.matmul(view1, view2.transpose(0, 1))
-#     ttl_score = torch.exp(ttl_score / temperature).sum(dim=1)
-#     cl_loss = -torch.log(pos_score / ttl_score+10e-6)
-#     return torch.sum(cl_loss)
