@@ -1,13 +1,11 @@
-# SGL-Torch
-This is the PyTorch implementation for our SIGIR 2021 paper. We also provide Tensorflow implementation for SGL: https://github.com/wujcan/SGL-TensorFlow.
+# GCPR
+This is the PyTorch implementation for our model GCPR.
 
->Jiancan Wu, Xiang Wang, Fuli Feng, Xiangnan He, Liang Chen, Jianxun Lian,and Xing Xie. 2021. Self-supervised Graph Learning for Recommendation, [Paper in arXiv](https://arxiv.org/abs/2010.10783).
-
-This project is based on [NeuRec](https://github.com/wubinzzu/NeuRec/tree/v3.x). Thanks to the contributors.
+This project is based on [SGL-Torch](). Thanks to the authors.
 
 ## Environment Requirement
 
-The code runs well under python 3.7.7. The required packages are as follows:
+The code runs well under python x.x.x. The required packages are as follows:
 
 - pytorch == 1.9.1
 - numpy == 1.20.3
@@ -19,7 +17,7 @@ The code runs well under python 3.7.7. The required packages are as follows:
 **Firstly**, compline the evaluator of cpp implementation with the following command line:
 
 ```bash
-python local_compile_setup.py build_ext --inplace
+python setup.py build_ext --inplace
 ```
 
 If the compilation is successful, the evaluator of cpp implementation will be called automatically.
@@ -29,11 +27,11 @@ Otherwise, the evaluator of python implementation will be called.
 
 **Secondly**, change the value of variable *root_dir* and *data_dir* in *main.py*, then specify dataset and recommender in configuration file *NeuRec.ini*.
 
-Model specific hyperparameters are in configuration file *./conf/SGL.ini*.
+Model specific hyperparameters are in configuration file *./conf/GCPR.ini*.
 
-Some important hyperparameters (taking a 3-layer SGL-ED as example):
+Some important hyperparameters:
 
-### yelp2018 dataset
+### Movielens-10M dataset
 ```
 aug_type=ED
 reg=1e-4

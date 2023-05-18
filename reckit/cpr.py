@@ -29,7 +29,6 @@ def batch_iterator(data, batch_size, drop_last=False):
 class CPRSampler(object):
     def __init__(self, dataset, sample_ratio, sample_rate, batch_size=1024, n_thread=4, k_interact=None, max_k_interact=3, drop_last=False):
         """
-        CPR采样
             dataset: Interaction
         """
         self.batch_size = batch_size
@@ -66,8 +65,8 @@ class CPRSampler(object):
         self.batch_sample_size = np.sum(self.batch_total_sample_sizes)
         self.sample_size = self.n_step * self.batch_sample_size
 
-        self.batch_choice_sizes = 3 * self.batch_sample_sizes  # gamma默认为3
-        self.choice_size = 3 * self.sample_size
+        self.batch_choice_sizes = 2 * self.batch_sample_sizes  # gamma默认为3
+        self.choice_size = 2 * self.sample_size
 
         self.users = np.empty(self.sample_size, dtype=np.int32)
         self.items = np.empty(self.sample_size, dtype=np.int32)

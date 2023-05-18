@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,8 +12,8 @@ from reckit.util import timer
 import warnings
 from reckit.util import inner_product
 from reckit.util import sp_mat_to_sp_tensor
-from reckit.util import get_initializer
- 
+from reckit.util import get_initializer, save_pkl
+
 class LightGCN(nn.Module):
     def __init__(self, num_users, num_items, embedding_size, norm_adj, n_layers=3, hyper_layers=1):
         super(LightGCN, self).__init__()
@@ -23,42 +24,15 @@ class LightGCN(nn.Module):
         self.n_layers = n_layers
         self.hyper_layers = hyper_layers
 
-        self.user_embeddings = nn.Embedding(self.num_users, self.embedding_size)
-        self.item_embeddings = nn.Embedding(self.num_items, self.embedding_size)
+        # self.user_embeddings = nn.Embedding(self.num_users, self.embedding_size)
+        # self.item_embeddings = nn.Embedding(self.num_items, self.embedding_size)
+        
         self.dropout = nn.Dropout(0.1)
         self._user_embeddings_final = None
         self._item_embeddings_final = None
 
     def forward(self, eps=0, perturbed=False):
-        # ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
-        # all_embeddings = []
-        # for k in range(self.n_layers):
-        #     ego_embeddings = torch.sparse.mm(self.norm_adj, ego_embeddings)
-        #     if perturbed:
-        #         random_noise = torch.rand_like(ego_embeddings).cuda()
-        #         ego_embeddings += torch.sign(ego_embeddings) * F.normalize(random_noise, dim=-1) * eps
-        #     all_embeddings.append(ego_embeddings)
-        # all_embeddings = torch.stack(all_embeddings, dim=1)
-        # all_embeddings = torch.mean(all_embeddings, dim=1)
-        # user_all_embeddings, item_all_embeddings = torch.split(all_embeddings, [self.num_users, self.num_items])
-        # return user_all_embeddings, item_all_embeddings
-        
-        # NCL
-        # ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
-        # all_embeddings = ego_embeddings
-        # embeddings_list = [all_embeddings]
-        # for layer_idx in range(max(self.n_layers, self.hyper_layers*2)):
-        #     all_embeddings = torch.sparse.mm(self.norm_adj, all_embeddings)
-        #     embeddings_list.append(all_embeddings)
-
-        # lightgcn_all_embeddings = torch.stack(embeddings_list[:self.n_layers+1], dim=1)
-        # lightgcn_all_embeddings = torch.mean(lightgcn_all_embeddings, dim=1)
-
-        # user_all_embeddings, item_all_embeddings = torch.split(lightgcn_all_embeddings, [self.num_users, self.num_items])
-        # return user_all_embeddings, item_all_embeddings, embeddings_list
-        
-        # XSimGCL
-        ego_embeddings = torch.cat([self.user_embeddings.weight, self.item_embeddings.weight], dim=0)
+        ego_embeddings = torch.cat([self.embedding_dict['user_emb'], self.embedding_dict['item_emb']], dim=0)
         all_embeddings = []
         cl_embeddings_list = [ego_embeddings]
         for k in range(self.n_layers):
@@ -71,7 +45,6 @@ class LightGCN(nn.Module):
         final_embeddings = torch.stack(all_embeddings, dim=1)
         final_embeddings = torch.mean(final_embeddings, dim=1)
         user_all_embeddings, item_all_embeddings = torch.split(final_embeddings, [self.num_users, self.num_items])
-        # user_all_embeddings_cl, item_all_embeddings_cl = torch.split(all_embeddings_cl, [self.num_users, self.num_items])
         if perturbed:
             return cl_embeddings_list
         return user_all_embeddings, item_all_embeddings
@@ -91,9 +64,11 @@ class LightGCN(nn.Module):
 
     def reset_parameters(self, init_method="uniform"):
         init = get_initializer(init_method)
-        init(self.user_embeddings.weight)
-        init(self.item_embeddings.weight)
-
+        self.embedding_dict = nn.ParameterDict({
+            'user_emb': nn.Parameter(init(torch.empty(self.num_users, self.embedding_size))),
+            'item_emb': nn.Parameter(init(torch.empty(self.num_items, self.embedding_size))),
+        })
+        
 class GCPR(AbstractRecommender):
     def __init__(self, config):
         super(GCPR, self).__init__(config)
@@ -120,8 +95,6 @@ class GCPR(AbstractRecommender):
         self.hyper_layers = config["hyper_layers"]
 
         # 对比学习超参数
-        self.ssl_aug_type = config["aug_type"]          # 数据增强方式
-        assert self.ssl_aug_type in ['nd', 'ed', 'rw']
         self.eps = config["eps"]
         self.tau = config["tau"]
         self.alpha = config["alpha"]
@@ -132,15 +105,16 @@ class GCPR(AbstractRecommender):
         # 其他超参数
         self.best_epoch = 0
         self.best_result = np.zeros([2], dtype=float)
-        self.model_str = '#eps=%.1f-tau=%.1f-sample_rate=%d-sample_ratio=%d' % (self.eps, self.tau, self.sample_rate, self.sample_ratio)
+        self.model_str = '#eps=%.2f-tau=%.2f-sample_rate=%d-sample_ratio=%d-alpha=%.2f' % (self.eps, self.tau, self.sample_rate, self.sample_ratio, self.alpha)
                          
         self.num_users, self.num_items, self.num_ratings = self.dataset.num_users, self.dataset.num_items, self.dataset.num_train_ratings
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         adj_matrix = self.create_adj_mat()
         adj_matrix = sp_mat_to_sp_tensor(adj_matrix).to(self.device)
 
-        self.lightgcn =LightGCN(self.num_users, self.num_items, self.embedding_size, adj_matrix, self.n_layers, self.hyper_layers).to(self.device)
+        self.lightgcn = LightGCN(self.num_users, self.num_items, self.embedding_size, adj_matrix, self.n_layers, self.hyper_layers)
         self.lightgcn.reset_parameters(init_method=self.param_init)
+        self.lightgcn = self.lightgcn.to(self.device)
         self.optimizer = torch.optim.Adam(self.lightgcn.parameters(), lr=self.lr)
 
     @timer
@@ -167,6 +141,7 @@ class GCPR(AbstractRecommender):
         return adj_matrix
 
     def train_model(self):
+        
         data_iter = CPRSampler(self.dataset, sample_ratio=self.sample_ratio, sample_rate=self.sample_rate, batch_size=self.batch_size, n_thread=self.num_thread)
         self.logger.info(self.evaluator.metrics_info())
         stopping_step = 0
@@ -285,10 +260,12 @@ class GCPR(AbstractRecommender):
                     if stopping_step >= self.stop_cnt:
                         self.logger.info("Early stopping is trigger at epoch: {}".format(epoch))
                         break
-        
+            
         self.logger.info("best results@epoch %d\n" % self.best_epoch)
         buf = '\t'.join([("%.4f" % x).ljust(12) for x in self.best_result])
         self.logger.info("\t\t%s" % buf)
+        # self.save()
+        
 
     def evaluate_model(self):
         flag = False
@@ -302,3 +279,8 @@ class GCPR(AbstractRecommender):
     def predict(self, users):
         users = torch.from_numpy(np.asarray(users)).long().to(self.device)
         return self.lightgcn.predict(users).cpu().detach().numpy()  # ratings
+    
+    def save(self):
+        dir = os.path.join(os.path.realpath(r"."), 'params')
+        with torch.no_grad():
+            save_pkl(self.lightgcn.state_dict(), dir, 'emb')

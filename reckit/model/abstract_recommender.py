@@ -20,7 +20,6 @@ class AbstractRecommender(object):
         
         run_id = f"{param_str[:150]}_{timestamp:.8f}"
         
-        # root_dir: /home/yjx/projects/GCPR/
         log_dir = os.path.join(config.root_dir + "log", data_name, model_name)
         logger_name = os.path.join(log_dir, run_id + ".log")
         logger = Logger(logger_name)
